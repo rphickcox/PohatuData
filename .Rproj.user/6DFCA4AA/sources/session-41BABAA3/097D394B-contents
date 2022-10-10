@@ -1,0 +1,169 @@
+---
+title: "Pohatu Penguins Monitoring Data Analysis"
+author: "Rachel Hickcox"
+date: "2022"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("tidyverse", "rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+### Connecting to Google Drive
+```{r googledrive}
+drive_auth(email = "pohatumonitoring@gmail.com")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
+               overwrite = TRUE, 
+               path = "Monitoring.xlsx")
+monitor <- read_excel("Monitoring.xlsx")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/1qh6zAXgVokfdx4WjjSls8qh4tAfEOL-bO3xg3CvRY44", 
+               overwrite = TRUE,
+               path = "Nest ID.xlsx")
+nestid <- read_excel("Nest ID.xlsx")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/16c4c5nXbz_PFf7iyN2DG7fExsi4P5uP-NSYAbCDX1rc", 
+               overwrite = TRUE, 
+               path = "Bird ID.xlsx")
+birdid <- read_excel("Bird ID.xlsx")
+```
+
+### Setup
+```{r setup}
+# Dates
+tdt <- floor_date(today(), "weeks", week_start = 1)
+tdt_d <- format(tdt, "%d-%m-%Y")
+tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", ""))
+start <- floor_date(as.Date(paste0("01-08-", format(today(), "%Y")), "%d-%m-%Y"), "weeks", week_start = 1)
+dates_df <- seq(start, today(), 7)
+```
+
+### Nests summary
+```{r nests}
+nests <- monitor %>%
+  mutate(Eggs = ifelse(is.na(Eggs), 0, Eggs), 
+         Chicks = ifelse(is.na(Chicks), 0, Chicks)) %>%  
+  group_by(`Nest ID`) %>%
+  arrange(`Nest ID`, DateTime) %>%
+  mutate(n = row_number()) %>%
+  mutate(n1 = ifelse(`Nest activity` == "Eggs/Chicks present", n, NA)) %>%
+  filter(n >= min(n1, na.rm = TRUE)-1) %>%
+  mutate(Date_last = lag(DateTime), .before = DateTime) %>%
+  filter(`Nest activity` == "Eggs/Chicks present" | `Nest activity` == "FAILED") %>%
+  dplyr::select(-c(n, n1)) %>%
+  mutate(Est_LayDate = as.Date(min(DateTime, na.rm = TRUE)), .after = 2, 
+         Date_last = difftime(as.Date(DateTime), as.Date(Date_last), units = "days")) %>%
+  mutate(.after = Est_LayDate,
+         DateTime = as.Date(DateTime), 
+         Est_HatchDate = Est_LayDate + 35) %>% 
+  dplyr::select(`Nest ID`, Date_last:Est_HatchDate, `Nest activity`:`Adult 1`, 
+                `Adult 2`, Eggs:`Chick 1 weight`, `Chick 2 ID`:`Chick 2 weight`) %>%
+  mutate(Status = ifelse(max(Chicks) > 0, "Chicks", "Eggs"), 
+         .before = 2)
+
+# Failed nests 
+failed_nests <- nests %>%
+  filter(`Nest activity` == "FAILED") %>%
+  dplyr::select(`Nest ID`, `Nest activity`, DateTime)
+
+# Nests with eggs
+eggs <- nests %>% 
+  filter(Status == "Eggs") %>% 
+  dplyr::select(`Nest ID`, Status, Est_LayDate:Est_HatchDate, Eggs) %>% 
+  distinct() %>% 
+  group_by(`Nest ID`) %>% 
+  filter(Eggs == max(Eggs, rm =TRUE), 
+         !`Nest ID` %in% failed_nests$`Nest ID`) %>% 
+  distinct() %>% 
+  arrange(Est_HatchDate)
+
+# Nests with chicks
+chicks <- nests %>% 
+  filter(Status == "Chicks" & Chicks != 0) %>% 
+  mutate(HatchDate = min(DateTime), .after = Est_HatchDate, 
+         Est_TranspondDate5 = HatchDate + 35,
+         Est_TranspondDate6 = HatchDate + 42,
+         Est_FledgeDate = HatchDate + 56) %>% 
+  dplyr::select(`Nest ID`, Status, Est_LayDate:Est_FledgeDate, Chicks) %>% 
+  group_by(`Nest ID`) %>% 
+  filter(Chicks == max(Chicks, rm =TRUE), 
+         !`Nest ID` %in% failed_nests$`Nest ID`) %>% 
+  distinct() %>% 
+  arrange(Est_TranspondDate5)
+# add parent marking / chick marking data to df chicks
+```
+
+### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
+```{r birdid}
+x <- data.frame(matrix(ncol = 25, nrow = nrow(birdid)))
+x[is.na(x)] <- ""
+
+monitor <- mutate(monitor, DT = format(DateTime, "%d/%m/%Y"))
+df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell"), y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell"), n = c(0722, 0786, 1121, 0791, 1017, 1150))
+
+marking <- birdid %>% 
+  dplyr::select(`Bird ID`, Sex:Location_marking, Tagger, `Nest ID_marking`:`Bill length_marking`) %>% 
+  mutate(.before = 1, DT = format(DateTime_marking, "%d/%m/%Y")) %>% 
+  left_join(monitor[c(37, 3, 16, 17)], by = c("DT" = "DT", "Nest ID_marking" = "Nest ID")) %>% 
+  distinct() %>% 
+  mutate(DateTime_marking = format(DateTime_marking, "%d/%m/%Y %H:%M")) %>% 
+  mutate(Prefix_number = "PIT", Number = `Bird ID`, Date = DateTime_marking, 
+         Date_Accuracy = "D", Banding_scheme = "NZNBBS Non-gamebird",
+         L3_number = "0722", L3_Name = "Rachel Hickcox", 
+         Bander_number = "",	Bander_name = Tagger, Other_name = "", Other_contact = "",
+         NZNBBS_code = 1,
+         Lookup_Code = "First marking",Stock_code = "",	Event_code = "first-mark-in-hand",
+         Capture_code	= "1b. Captured in nest box", Wild_Captive = "Wild",
+         Common_name	= "white-flippered blue penguin, kororā",	
+         Scientific_name = "Eudyptula minor albosignata",	Species_code = "016", 
+         Age = Age_marking, Sex_ = Sex, Region_Code =  "11. Canterbury",
+         Locality_general = "1 Pōhatu/Flea Bay, Banks Peninsula",
+         Locality_description = "Pōhatu/Flea Bay, Banks Peninsula", Latitude =	-43.86838,	
+         Longitude = 173.00887, Easting =	1600714, Northing =	5142745, Coordinate_system =	"WGS84", 
+         Locality_accuracy = 100) %>% 
+  bind_cols(x[1:18]) %>% 
+  mutate(Non_leg_mark_type_2	= "insertion transponder"	, Non_leg_mark_id_2 = "*",
+         Status_code_1	= "alive", Condition_1 = "0. Good") %>% 
+  bind_cols(x[1:2]) %>% 
+  mutate(status_detail1 = Status_marking, Status_detail2 = "",
+         Notes = "Permit 94750-FAU", Sent_date = format(today(), "%d/%m/%Y %H:%M"), Moratorium	= "", 
+         Detail1 = "mass (excluding bag/transmitter etc.)", Units1 = "grams (g)", Data1 = Weight_marking,
+         Detail2 = "bill length",	Units2 = "millimetres (mm)",	Data2 =  `Bill length_marking`, 
+         Detail3 = "bill depth",	Units3 = "millimetres (mm)",	Data3 =  `Bill depth_marking`, 
+         Detail4	= "nest number", Units4	= "nest number", Data4 = `Nest ID_marking`) %>% 
+  bind_cols(x[1:21]) %>% 
+  mutate(Project_Name	= "Pōhatu Little Penguins", Species_Group	= "Penguins") %>% 
+  dplyr::select(-c(DT:`Bill length_marking`))
+
+marking_fix <- marking %>% 
+  mutate(Eggs = ifelse(is.na(Eggs), 0, Eggs), 
+         Chicks = ifelse(is.na(Chicks), 0, Chicks), 
+         Eggs = ifelse(Eggs == 0 & status_detail1 == "Incubating eggs", 2, Eggs), 
+         Chicks = ifelse(Chicks == 0 & status_detail1 == "Guarding chicks", 2, Chicks), 
+         status_detail1 = ifelse(Eggs == 2, "56. With more than one egg", status_detail1),
+         status_detail1 = ifelse(Eggs == 1, "55. With egg", status_detail1),
+         status_detail1 = ifelse(Chicks == 2, "58. With more than one chick", status_detail1),
+         status_detail1 = ifelse(Chicks == 1, "57. With chick", status_detail1),
+         status_detail1 = ifelse(status_detail1 == "Loafing", 
+                                 "53. On empty nest", status_detail1)) %>%  
+  mutate(Age = recode(Age, "Adult" = "A", "Chick" = "C", "Juvenile" = "J", "Unknown" ="U"), 
+         Age = ifelse(is.na(Age), "U", Age), 
+         Sex_ = recode(Sex_, "Female" = "FU", "Male" = "U", "Unknown" = "U"),
+         Sex_ = ifelse(is.na(Sex_), "U", Sex_)) %>% 
+  group_by(Data4) %>% 
+  mutate(Sex_ = ifelse(Sex_ == "U" & "FU" %in% Sex_, "MU", Sex_)) %>% 
+  left_join(df, by = c("Bander_name" = "x"), keep = FALSE) %>% 
+  mutate(Bander_name = y, Bander_number = n) %>% 
+  dplyr::select(-c(Eggs, Chicks, y, n))
+
+```
