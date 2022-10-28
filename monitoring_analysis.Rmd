@@ -9,8 +9,8 @@ editor_options:
 
 ### Load packages
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
-pkgs <- c("tidyverse", "rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
-          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate")
+pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -100,7 +100,65 @@ chicks <- nests %>%
          !`Nest ID` %in% failed_nests$`Nest ID`) %>% 
   distinct() %>% 
   arrange(Est_TranspondDate5)
+
 # add parent marking / chick marking data to df chicks
+cols <- c(Adult1 = NA_real_, Adult2 = NA_real_, Chick1 = NA_real_, Chick2 = NA_real_, Adult3 = NA_real_)
+birdid_chicks <- birdid %>%
+  filter(`Nest ID_marking` %in% chicks$`Nest ID`) %>% 
+  dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`)) %>% 
+  group_by(`Nest ID_marking`, Age_marking) %>% 
+  mutate(n = row_number()) %>% 
+  unite(nn, Age_marking, n, sep = "") %>% 
+  pivot_wider(names_from = nn, values_from = `Bird ID`) %>% 
+  add_column(!!!cols[!names(cols) %in% names(.)]) %>%
+  relocate(Adult2,  .after = Adult1) %>% 
+  relocate(Adult3,  .after = Adult2) %>% 
+  relocate(Chick2,  .after = Chick1) %>% 
+  right_join(chicks, by = c("Nest ID_marking" = "Nest ID")) %>% 
+  arrange(Est_TranspondDate5) %>% 
+  mutate(Notes = ifelse(floor_date(Est_TranspondDate5, "weeks", week_start = 1) == tdt & 
+                          is.na(Chick1) & 
+                          is.na(Chick2), "Mark chicks", NA)) %>% 
+  mutate(Notes = ifelse(floor_date(Est_TranspondDate6, "weeks", week_start = 1) == tdt & 
+                          is.na(Chick1) & 
+                          is.na(Chick2), "Mark chicks", Notes)) %>% 
+  ungroup() %>% 
+  #mutate_if(is.Date, ~paste0("'", .)) %>%
+  #mutate(`__id` = row.names(.)) %>%
+  mutate(`__id` = NA) %>%
+  mutate_if(is.numeric, as.character) %>%
+  mutate_if(is.Date, as.character)
+write.csv(birdid_chicks, "Chicks.csv", row.names = FALSE)
+```
+
+### Upload files to Google Drive
+#### This can also be executed in KororaShiny (https://rphickcox.shinyapps.io/pohatuapp/) and 
+#### C:\Users\rphic\OneDrive\Documents\GitHub\KororaShiny\PohatuApp.Rproj
+```{r upload}
+x <- gs4_find("Notifications")
+
+tobind <- birdid_chicks[c(1, 15, 11, 12, 13, 16)]
+temp <- read_sheet(x) %>% 
+  mutate(n = 2) %>% 
+  bind_rows(c(tobind, n = 1)) %>%
+  group_by(`Nest ID_marking`) %>% 
+  fill('__id') %>% 
+  separate(Notes, ",", into = LETTERS[seq( from = 1, to = 10 )]) %>% 
+  pivot_longer(cols = A:J) %>% 
+  select(-name) %>% 
+  distinct() %>% 
+  mutate(Notes = paste0(value, collapse = ", "), 
+         Notes = str_replace_all(Notes, ", NA", ""),
+         Notes = str_replace_all(Notes, "NA, ", "")) %>% 
+  select(-value) %>% 
+  relocate(Notes, .after = 'Nest ID_marking') %>% 
+  distinct() %>% 
+  filter(Notes != "NA") %>% 
+  mutate(nn = n()) %>% 
+  filter(n == 1 | nn == 1) %>% 
+  select(-c(n, nn))
+
+write_sheet(temp, ss = x, sheet = "Notifications")
 ```
 
 ### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
@@ -165,5 +223,17 @@ marking_fix <- marking %>%
   left_join(df, by = c("Bander_name" = "x"), keep = FALSE) %>% 
   mutate(Bander_name = y, Bander_number = n) %>% 
   dplyr::select(-c(Eggs, Chicks, y, n))
+```
+
+```{r}
+
+flags
+
+error_birdid <- birdid %>% 
+  dplyr::select(-Name) %>% 
+  filter(across('Bird ID':'Bill length_marking'), ~is.na(.))
+
+
 
 ```
+
