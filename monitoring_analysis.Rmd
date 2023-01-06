@@ -44,63 +44,211 @@ birdid <- read_excel("Bird ID.xlsx")
 tdt <- floor_date(today(), "weeks", week_start = 1)
 tdt_d <- format(tdt, "%d-%m-%Y")
 tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", ""))
-start <- floor_date(as.Date(paste0("01-08-", format(today(), "%Y")), "%d-%m-%Y"), "weeks", week_start = 1)
+yr <- ifelse(month(today()) > 8, year(today()), year(today())-1)
+start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1)
 dates_df <- seq(start, today(), 7)
 ```
 
 ### Nests summary
 ```{r nests}
+# Nest coords 
+nestid_coord <- nestid %>%
+  tidyr::separate(Location, into = c("Lat", "Long"), ",") %>%
+  dplyr::select(`Nest ID`, Lat, Long) %>%
+  mutate(Lat = as.numeric(Lat), Long = as.numeric(Long))
+
 nests <- monitor %>%
-  mutate(Eggs = ifelse(is.na(Eggs), 0, Eggs), 
-         Chicks = ifelse(is.na(Chicks), 0, Chicks)) %>%  
+  mutate(Eggs = ifelse(is.na(Eggs), 0, as.numeric(Eggs)), 
+         Chicks = ifelse(is.na(Chicks), 0, as.numeric(Chicks))) %>%  
   group_by(`Nest ID`) %>%
   arrange(`Nest ID`, DateTime) %>%
   mutate(n = row_number()) %>%
   mutate(n1 = ifelse(`Nest activity` == "Eggs/Chicks present", n, NA)) %>%
-  filter(n >= min(n1, na.rm = TRUE)-1) %>%
-  mutate(Date_last = lag(DateTime), .before = DateTime) %>%
-  filter(`Nest activity` == "Eggs/Chicks present" | `Nest activity` == "FAILED") %>%
-  dplyr::select(-c(n, n1)) %>%
-  mutate(Est_LayDate = as.Date(min(DateTime, na.rm = TRUE)), .after = 2, 
-         Date_last = difftime(as.Date(DateTime), as.Date(Date_last), units = "days")) %>%
-  mutate(.after = Est_LayDate,
-         DateTime = as.Date(DateTime), 
-         Est_HatchDate = Est_LayDate + 35) %>% 
+  filter(n >= min(n1, na.rm = TRUE)-1 | n == max(n1, na.rm = TRUE)+1) %>%
+  mutate(Date_last = lag(DateTime), .before = DateTime) %>% 
+  mutate(`Nest activity` = ifelse(Interaction == "Uplifted", "Uplifted",`Nest activity`)) %>% 
+  #dplyr::select(-c(n, n1)) %>%
+  mutate(.after = 2,
+         DateTime = as.Date(DateTime),
+         Week = week(DateTime),
+         Date_last = difftime(as.Date(DateTime), as.Date(Date_last), units = "days"), 
+         Est_LayDate = as.Date(min(DateTime, na.rm = TRUE))) %>%
+  mutate(.after = Est_LayDate, Est_HatchDate = Est_LayDate + 35) %>% 
   dplyr::select(`Nest ID`, Date_last:Est_HatchDate, `Nest activity`:`Adult 1`, 
-                `Adult 2`, Eggs:`Chick 1 weight`, `Chick 2 ID`:`Chick 2 weight`) %>%
-  mutate(Status = ifelse(max(Chicks) > 0, "Chicks", "Eggs"), 
-         .before = 2)
+                `Adult 2`, Eggs:`Chick 1 weight`, `Chick 2 ID`:`Chick 2 weight`, n, n1) %>%
+  mutate(Status = ifelse(Eggs > 0, "Eggs", NA), 
+         Status = ifelse(Chicks > 0, "Chicks", Status), 
+         .before = 2) %>% 
+  left_join(nestid_coord, by = "Nest ID") %>% 
+  mutate(n2 = lag(Chicks)) %>% 
+  group_by(`Nest ID`, `Nest activity`) %>% 
+  mutate(`Nest activity` = ifelse(`Nest activity` == "FAILED" & 
+                                    duplicated(`Nest activity`), 
+                                  NA, `Nest activity`), 
+         Status = ifelse(is.na(`Nest activity`), NA, Status)) %>% 
+  group_by(`Nest ID`) %>% 
+  mutate(Status = ifelse(is.na(n1) & n2 > 0, "Fledged", Status),
+         Status = ifelse(`Nest activity` == "FAILED" & !is.na(Status), 
+                         "Failed", Status), 
+         Status = ifelse(`Nest activity` == "Uplifted", `Nest activity`, Status),
+         Status = ifelse(`Nest activity` == "Empty" & 
+                           lag(`Nest activity`) == "Uplifted", NA, Status),
+         nn = ifelse(lag(`Nest activity`) == "FAILED" & 
+                       `Nest activity` == "Empty", "R", NA), 
+         nn = unlist(nn)) %>%  
+  filter(!is.na(Status), is.na(nn)) %>% 
+  select(-c(n, n1, n2, nn))
 
 # Failed nests 
 failed_nests <- nests %>%
-  filter(`Nest activity` == "FAILED") %>%
-  dplyr::select(`Nest ID`, `Nest activity`, DateTime)
+  filter(Status == "Failed") %>% # | Status == "Uplifted") %>%
+  dplyr::select(`Nest ID`, `Nest activity`, DateTime) %>% 
+  group_by(`Nest ID`) %>% 
+  arrange(`Nest ID`, DateTime) %>% 
+  left_join(nestid_coord, by = "Nest ID")
+#clipr::write_clip(failed_nests)
 
 # Nests with eggs
 eggs <- nests %>% 
-  filter(Status == "Eggs") %>% 
-  dplyr::select(`Nest ID`, Status, Est_LayDate:Est_HatchDate, Eggs) %>% 
-  distinct() %>% 
+  filter(Eggs != 0) %>% 
+  dplyr::select(DateTime, `Nest ID`, Status, Est_LayDate:Est_HatchDate, Eggs, Chicks) %>% 
+  distinct(across(`Nest ID`:Chicks), .keep_all = T) %>%
   group_by(`Nest ID`) %>% 
-  filter(Eggs == max(Eggs, rm =TRUE), 
-         !`Nest ID` %in% failed_nests$`Nest ID`) %>% 
-  distinct() %>% 
-  arrange(Est_HatchDate)
+  arrange(`Nest ID`, DateTime) %>% 
+  mutate(HatchDate = NA, .after = Est_HatchDate, 
+         Est_TranspondDate5 = Est_HatchDate + 35,
+         Est_TranspondDate6 = Est_HatchDate + 42,
+         Est_FledgeDate = Est_HatchDate + 56) %>% 
+  mutate(diffeggs = as.numeric(Eggs) - lag(as.numeric(Eggs)))
 
 # Nests with chicks
 chicks <- nests %>% 
-  filter(Status == "Chicks" & Chicks != 0) %>% 
+  filter(Status == "Chicks" & Chicks != 0 | Status == "Fledged") %>% 
+  #merging with failed nests to identify rows of failed nests
+  left_join(data.frame("Nest ID" = failed_nests$`Nest ID`, 
+                       "Failed" = failed_nests$DateTime), 
+            by = c("Nest ID" = "Nest.ID")) %>% 
+  group_by(`Nest ID`) %>% 
+  mutate(Failed = ifelse(DateTime < Failed, "F", "A"), 
+         Failed = replace_na("A")) %>% 
+group_by(`Nest ID`, Failed) %>% 
   mutate(HatchDate = min(DateTime), .after = Est_HatchDate, 
          Est_TranspondDate5 = HatchDate + 35,
          Est_TranspondDate6 = HatchDate + 42,
          Est_FledgeDate = HatchDate + 56) %>% 
-  dplyr::select(`Nest ID`, Status, Est_LayDate:Est_FledgeDate, Chicks) %>% 
-  group_by(`Nest ID`) %>% 
-  filter(Chicks == max(Chicks, rm =TRUE), 
-         !`Nest ID` %in% failed_nests$`Nest ID`) %>% 
-  distinct() %>% 
-  arrange(Est_TranspondDate5)
+ dplyr::select(DateTime, `Nest ID`, Status, Est_LayDate:Est_FledgeDate, Eggs, Chicks, Failed) %>% 
+  distinct(across(`Nest ID`:Chicks), .keep_all = T) %>%
+  arrange(`Nest ID`, DateTime) %>% 
+  mutate(diffchicks = as.numeric(Chicks) - lag(as.numeric(Chicks)), 
+         diffchicks = ifelse(Status == "Fledged", NA, diffchicks),
+         nrow = row_number(),
+         Status = ifelse(any(Status =="Fledged"), "Fledged", Status)) %>%
+  filter(nrow == 1) %>% 
+  select(-c(DateTime, nrow)) %>% 
+  distinct()
 
+# Nests with fledglings
+chicksfledge <- nests %>% 
+  filter((Status == "Chicks" & Chicks != 0) | Status == "Fledged") %>% 
+    #merging with failed nests to identify rows of failed nests
+  left_join(data.frame("Nest ID" = failed_nests$`Nest ID`, 
+                       "Failed" = failed_nests$DateTime), 
+            by = c("Nest ID" = "Nest.ID")) %>% 
+  group_by(`Nest ID`) %>% 
+  mutate(Failed = ifelse(DateTime < Failed, "F", "A"), 
+         Failed = replace_na("A")) %>% 
+group_by(`Nest ID`, Failed) %>% 
+mutate(HatchDate = min(DateTime), .after = Est_HatchDate, 
+         Est_TranspondDate5 = HatchDate + 35,
+         Est_TranspondDate6 = HatchDate + 42,
+         Est_FledgeDate = HatchDate + 56) %>% 
+  dplyr::select(DateTime, `Nest ID`, Status, Est_LayDate:Est_FledgeDate, Chicks, Failed) %>% 
+  slice_tail(n = 3) %>% 
+  mutate(Fledged = ifelse(Status == "Fledged", max(Chicks, na.rm = T), NA)) %>% 
+  distinct() %>% 
+  filter(!is.na(Fledged)) %>%
+  arrange(Est_TranspondDate5) %>% 
+  ungroup() %>% 
+  select(-Failed)
+
+# TOTALS
+totals <- chicks %>% 
+  filter(Chicks == max(Chicks)) %>%
+  ungroup() %>%
+  summarise(Chicks_hatched = sum(Chicks))
+totals <- eggs %>% 
+  filter(Eggs == max(Eggs)) %>%
+  ungroup() %>%
+  summarise(Total_nests = length(unique(nests$`Nest ID`)), 
+            Eggs_laid = sum(Eggs),
+            totals,
+                Chicks_fledged = sum(chicksfledge$Fledged))
+```
+
+```{r}
+# Weights
+
+# nests where chicks fledged
+xx <- chicksfledge %>% 
+  select(`Nest ID`, Status)
+# nests failed
+xxx <- failed_nests %>% 
+  filter(`Nest activity` == "FAILED")
+
+# filtering out failed nests
+weights_nests <- nests %>%
+  group_by(`Nest ID`) %>% 
+  #filter(row_number() < max(which("Nest Activity" == "FAILED")))
+  #merging with failed nests to identify rows of failed nests
+  left_join(data.frame("Nest ID" = xxx$`Nest ID`, 
+                       "Failed" = xxx$DateTime), 
+            by = c("Nest ID" = "Nest.ID")) %>% 
+filter(is.na(Failed)) %>%  
+  #group_by(`Nest ID`, Failed) %>% 
+  left_join(chicks[c(1,5)], by = "Nest ID") %>% 
+  select(c(1,2,4,14:19,23)) %>% 
+  mutate(HatchDate = as.Date(HatchDate), 
+         days_hatch = difftime(DateTime, HatchDate, units = "days"), 
+         weeks_hatch = round(as.numeric(days_hatch)/7, 1)) %>% 
+  filter(!is.na(`Chick 1 weight`)) %>% 
+  #fledged nests
+    left_join(xx, by = "Nest ID", suffix = c("2", "")) %>% 
+  mutate(Status = ifelse(is.na(Status), "Active", Status), 
+         Status = ifelse(Status2 == "Uplifted", "Uplifted", Status))
+
+
+temp <- weights_nests %>% 
+  select(-starts_with("Chick 2")) %>% 
+  mutate(`Chick 1 ID` = ifelse(is.na(`Chick 1 ID`), "c1", `Chick 1 ID`)) %>% 
+  rename("ID" = `Chick 1 ID`, "Fate" = `Chick 1 status`, "Weight" = `Chick 1 weight`)
+
+weights_chick <- weights_nests %>% 
+  select(-starts_with("Chick 1")) %>% 
+  mutate(`Chick 2 ID` = ifelse(is.na(`Chick 2 ID`), "c2", `Chick 2 ID`)) %>% 
+  rename("ID" = `Chick 2 ID`, "Fate" = `Chick 2 status`, "Weight" = `Chick 2 weight`) %>% 
+  bind_rows(temp) %>% 
+  arrange(`Nest ID`, ID) %>% 
+  filter(!is.na(Weight)) %>% 
+  mutate(days_hatch = as.numeric(days_hatch)) %>% 
+  unite(col = ID, `Nest ID`, ID, sep = "-", remove = FALSE, na.rm = TRUE) %>% 
+  mutate(Underweight = ifelse(Weight <= 700 & days_hatch >= 42, "Concern", "Ok"), 
+         Underweight = ifelse(Weight <= 600 & days_hatch >= 42, "Intervene", Underweight)) %>% 
+  select(-Status2)
+clipr::write_clip(weights_chick)
+
+ggplot(data = weights_chick, aes(x = days_hatch, y = Weight, 
+                                 shape = Status, 
+                                 color = `Nest ID`, 
+                                 group = ID)) +
+  geom_point() +
+   geom_line() +
+  geom_rug() +
+  theme_minimal() +
+  guides(color = FALSE)
+
+```
+
+```{r}
 # add parent marking / chick marking data to df chicks
 cols <- c(Adult1 = NA_real_, Adult2 = NA_real_, Chick1 = NA_real_, Chick2 = NA_real_, Adult3 = NA_real_)
 birdid_chicks <- birdid %>%
@@ -128,6 +276,17 @@ birdid_chicks <- birdid %>%
   mutate(`__id` = NA) %>%
   mutate_if(is.numeric, as.character) %>%
   mutate_if(is.Date, as.character)
+
+# Eggs, Chicks
+eggchick <- eggs %>%
+  bind_rows(chicks) %>% 
+  arrange(`Nest ID`, DateTime) %>% 
+  left_join(birdid_chicks[1:6], by = c("Nest ID"="Nest ID_marking" )) %>% 
+  left_join(nestid_coord, by = "Nest ID") %>%
+  distinct()
+clipr::write_clip(eggchick)
+
+
 write.csv(birdid_chicks, "Chicks.csv", row.names = FALSE)
 ```
 
@@ -223,17 +382,43 @@ marking_fix <- marking %>%
   left_join(df, by = c("Bander_name" = "x"), keep = FALSE) %>% 
   mutate(Bander_name = y, Bander_number = n) %>% 
   dplyr::select(-c(Eggs, Chicks, y, n))
+
+marking_fix %>% 
+  group_by(Age) %>% 
+  summarise(Age = unique(Age), 
+            Count = n())
+
 ```
 
 ```{r}
+ecfate <- read_excel("nests_ecfate_18112022.xlsx")
+ecfate$code <- as.factor(ecfate$code)
+#ccord <- ecfate %>% filter(!is.na(Lat))
+#coordinates(ccord) <- ~Lat+Long
 
-flags
+library(leaflet)
+pal <- colorFactor(c("yellow", "blue", "purple", "orange", "red"), ecfate$code)
+lab <- as.character(ecfate$code)
 
-error_birdid <- birdid %>% 
-  dplyr::select(-Name) %>% 
-  filter(across('Bird ID':'Bill length_marking'), ~is.na(.))
+x <- leaflet() %>% 
+  #addCircles(lng = ~Long, lat = ~Lat) %>% 
+  addTiles('http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+           options = providerTileOptions(noWrap = TRUE), group = "World Imagery") %>%
+  # addTiles('http://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/Mapserver/tile/{z}/{y}/{x}',
+  #          options = providerTileOptions(noWrap = TRUE),group = "Labels") %>% 
+  addCircleMarkers(data = ecfate, lat = ~Lat, lng = ~Long,
+                   radius = 3,
+                   color = ~pal(ecfate$code),
+                   stroke = FALSE, fillOpacity = 1) %>%
+  leaflet::addLegend(pal = pal, values = lab, opacity = 1, position = "bottomleft") %>%
+  fitBounds(173.00275,-43.871,173.015,-43.866)
 
+library(mapview)
+library(htmlwidgets)
+mapshot(x, file = "~/map_activefailednests.png")
+saveWidget(x, selfcontained = T, file = "~/map_activefailednests.html")
 
-
+resfactor <- 3
+png(filename=x, res = 72*resfactor, height=640*resfactor, width=640*resfactor)
 ```
 

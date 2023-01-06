@@ -1,0 +1,101 @@
+---
+title: "Pohatu Penguins Photo Management"
+author: "Rachel Hickcox"
+date: "2022"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+### Connecting to Google Drive
+```{r googledrive}
+drive_auth(email = "pohatumonitoring@gmail.com")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
+               overwrite = TRUE, 
+               path = "Monitoring.xlsx")
+monitor <- read_excel("Monitoring.xlsx")
+```
+
+# SETUP
+```{r}
+date_before <- as.Date("2022-11-01")
+
+files_drive1 <- drive_ls(path = "Monitoring.files")
+save_to <- "D:/Monitoring_photos" # THIS MAY CHANGE
+
+################# FUNCTIONS ##################################################
+# Function to download, save, and rename image
+archive.photo <-  function(ls_down, to_download, save_to){
+  newpath <- filter(to_download, Image.http == ls_down)
+  newpath <- newpath$newpath
+  folder <- str_split(newpath, "\\W")[[1]][1]
+  ifelse(!dir.exists(file.path(save_to, folder)), dir.create(file.path(save_to, folder)), FALSE)
+  drive_download(file = ls_down, 
+                 overwrite = TRUE, 
+                 path = file.path(save_to, folder, newpath))
+}
+
+# Function to DELETE file from Google Drive!
+delete.photo <- function(ls_down){
+  # BE CAREFUL! THIS DELETES THE FILE!
+  drive_trash(file = ls_down)
+}
+###################################################################
+
+# List of images in folder on Google Drive
+files_drive <- files_drive1 %>%
+  mutate(Date = str_replace_all(name, '.jpg', ""), 
+         Date = str_replace_all(Date, '\\.', ":"),  
+         Date = as.Date(Date)) %>% 
+  filter(Date < date_before)
+
+# List of monitoring records with images in files_drive
+to_download <- monitor %>%
+  select(DateTime, `Nest ID`, Image, Image.http, `__id`) %>%
+  mutate(Image.http = str_replace_all(Image.http, "\\s", ", ")) %>% 
+  separate_rows(Image, Image.http, sep = ", ") %>%
+  mutate(pathname = str_split(Image, "/+"), 
+         pathname = map_chr(pathname, ~.x[length(.x)]), 
+         newpath = paste(`Nest ID`, pathname, sep = " ")) %>%  # get just path name
+  filter(!is.na(Image), pathname %in% files_drive$name)
+
+nrow(files_drive) == nrow(to_download)
+
+# List of image urls, 
+ls_down <- to_download$Image.http
+#ls_down <- ls_down[2:3] # FOR TESTING
+```
+
+# EXECUTING SAVE/RENAME FUNCTION
+```{r}
+# Download, save, and rename image
+lapply(ls_down, FUN = archive.photo, to_download = to_download, save_to = save_to) 
+```
+
+# ECECUTING DELETE FUNCTION
+```{r}
+# Delete image
+lapply(ls_down, FUN = delete.photo)
+
+# Saving file with new names 
+xx <- read.csv(file.path(save_to, "Photonames_archivedfromGoogleDrive.csv"))
+names(xx) <- names(to_download)
+xx <- rbind(xx, to_download)
+xx <- distinct(xx)
+write.csv(xx, 
+          file.path(save_to, "Photonames_archivedfromGoogleDrive.csv"), 
+          row.names = FALSE)
+```
+
