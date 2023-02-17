@@ -1,0 +1,154 @@
+---
+title: "Pohatu Penguins Google Drive Error-checking"
+author: "Rachel Hickcox"
+date: "2023"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+This file checks the Google Drive sheet "Monitoring", part of the Memento Database, for errors
+and re-uploads the fixed file to Google Drive. 
+
+Note that the app must be synced to incorporate changes.
+
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+### Connecting to Google Drive
+```{r googledrive}
+drive_auth(email = "pohatumonitoring@gmail.com")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
+               overwrite = TRUE, 
+               path = "Monitoring.xlsx")
+monitor <- read_excel("Monitoring.xlsx")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/1qh6zAXgVokfdx4WjjSls8qh4tAfEOL-bO3xg3CvRY44", 
+               overwrite = TRUE,
+               path = "Nest ID.xlsx")
+nestid <- read_excel("Nest ID.xlsx")
+
+drive_download(file = "https://docs.google.com/spreadsheets/d/16c4c5nXbz_PFf7iyN2DG7fExsi4P5uP-NSYAbCDX1rc", 
+               overwrite = TRUE, 
+               path = "Bird ID.xlsx")
+birdid <- read_excel("Bird ID.xlsx")
+```
+
+### Setup
+```{r setup}
+# Dates
+tdt <- floor_date(today(), "weeks", week_start = 1)
+tdt_d <- format(tdt, "%d-%m-%Y")
+tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", ""))
+yr <- ifelse(month(today()) > 8, year(today()), year(today())-1)
+start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1)
+dates_df <- seq(start, today(), 7)
+
+print_and_capture <- function(x)
+{
+  paste(capture.output(print(x)), collapse = "\n")
+}
+```
+
+### Error-checking monitoring
+```{r}
+monitor_groom <- monitor %>% 
+  arrange(`Nest ID`, DateTime) %>% 
+  mutate(
+    `Number of adults` = as.integer(`Number of adults`),
+    #Eggs = as.integer(Eggs),
+    #Chicks = as.integer(Chicks), 
+    # Changing notes to sentence case
+    Notes = str_to_sentence(Notes, locale = "en"),
+    # Changing status depending on number of adults
+    `Status Adult 1` = ifelse(`Number of adults` == 0 | `Nest activity` == "Empty", 
+                              NA, `Status Adult 1`),
+    `Status Adult 2` = ifelse(`Number of adults` == 0 |`Nest activity` == "Empty", 
+                              NA, `Status Adult 2`),
+    `Status Adult 3` = ifelse(`Number of adults` == 0 |`Nest activity` == "Empty", 
+                              NA, `Status Adult 3`),
+    `Status Adult 4` = ifelse(`Number of adults` == 0 |`Nest activity` == "Empty", 
+                              NA, `Status Adult 4`),
+    `Status Adult 2` = ifelse(`Number of adults` == 1, NA, `Status Adult 2`),
+    `Status Adult 3` = ifelse(`Number of adults` == 1, NA, `Status Adult 3`),
+    `Status Adult 4` = ifelse(`Number of adults` == 1, NA, `Status Adult 4`),
+    `Status Adult 3` = ifelse(`Number of adults` == 2, NA, `Status Adult 3`),
+    `Status Adult 4` = ifelse(`Number of adults` == 2, NA, `Status Adult 4`),
+    # Changing status of adult to loafing if nest activity is also loafing
+    `Status Adult 1` = ifelse(`Nest activity` == "Loafing adult(s)", "Loafing", `Status Adult 1`), 
+    `Status Adult 2` = ifelse(`Nest activity` == "Loafing adult(s)" & `Number of adults` == 2,
+                              "Loafing", `Status Adult 2`), 
+    # Changing status of adult depending on nest activity 
+    `Status Adult 1` = ifelse(`Nest activity` == "Eggs/Chicks present" & `Number of adults` > 0,
+                              "With eggs/chicks", `Status Adult 1`),
+    `Status Adult 2` = ifelse(`Nest activity` == "Eggs/Chicks present" & `Number of adults` == 2,
+                              "With eggs/chicks", `Status Adult 2`),
+    `Status Adult 1` = ifelse(`Nest activity` == "Moulting" & `Number of adults` > 0,
+                              "Moulting", `Status Adult 1`),
+    # Changing chick status if NA but number of chicks > 0
+    `Chick 1 status` = ifelse(Chicks > 0 & is.na(`Chick 1 status`), "Alive", `Chick 1 status`), 
+    `Chick 2 status` = ifelse(Chicks == 2 & is.na(`Chick 2 status`), "Alive", `Chick 2 status`), 
+    `Chick 1 status` = ifelse(Chicks == 0, NA, `Chick 1 status`), 
+    `Chick 2 status` = ifelse(Chicks == 0, NA, `Chick 2 status`),
+    # Eggs/chicks to NA if not breeding
+    Eggs = ifelse(!`Nest activity` %in% c("Eggs/Chicks present", "FAILED"), NA, Eggs),
+    Chicks = ifelse(!`Nest activity` %in% c("Eggs/Chicks present", "FAILED"), NA, Chicks),
+    `Number of adults` = ifelse(`Nest activity` == "Empty", NA, `Number of adults`),
+    # Any na's in number of adults changed to 0
+    `Number of adults`= as.character(`Number of adults`)) %>% 
+  mutate(      
+    # Flagging Eggs/Chicks that are 0/NA but Nest activity = Eggs/chicks 
+    TOFIX = ifelse(`Nest activity` == "Eggs/Chicks present" & Eggs == 0 & Chicks == 0, 
+                   "No egg/chick count", NA), 
+    TOFIX = ifelse(`Nest activity` == "Eggs/Chicks present" & is.na(Eggs) & is.na(Chicks), 
+                   "No egg/chick count", TOFIX), 
+    # Flagging missing adult status but number of adults > 0
+    TOFIX = ifelse(`Number of adults` == 1 & is.na(`Status Adult 1`), 
+                   "No adult status", TOFIX), 
+    TOFIX = ifelse(`Number of adults` == 2 & is.na(`Status Adult 1`) & is.na(`Status Adult 2`), 
+                   "No adult status", TOFIX), 
+    #Flagging Eggs/Chicks with implausible counts
+    TOFIX = ifelse(Eggs > 1 & Chicks > 0,
+                   "Check egg/chick count", TOFIX), 
+    TOFIX = ifelse(Eggs > 0 & Chicks > 1,
+                   "Check egg/chick count", TOFIX), 
+    # Flagging Marking events with no Bird ID in any columns
+    TOFIX = ifelse(Interaction == "Marking" & is.na(`Adult 1`) & is.na(`Adult 2`) &
+                     is.na(`Adult 3`) & is.na(`Adult 4`) & 
+                     is.na(`Chick 1 ID`) & is.na(`Chick 2 ID`) & 
+                     is.na(`Chick 3 ID`) & is.na(`Chick 4 ID`), "No bird ID", TOFIX), 
+    TOFIX = ifelse(Interaction == "Uplifted" & `Chick 1 status` == "Alive" & 
+                     `Chick 2 status` == "Alive", "Check uplift status", TOFIX)) %>% 
+  arrange(`Nest ID`, DateTime) %>% 
+  ungroup()
+```
+
+### Upload files to Google Drive
+```{r}
+monitor_groom2 <- dplyr::select(monitor_groom, -TOFIX)
+x <- gs4_find("Monitoring") %>% 
+  filter(name == "Monitoring")
+write_sheet(monitor_groom2, ss = x, sheet = "Monitoring")
+```
+
+### Isolating records that need manual fixing
+```{r}
+output <- monitor_groom %>% 
+  filter(!is.na(TOFIX)) %>% 
+  relocate(TOFIX, .before = DateTime)
+if(nrow(output) > 0){
+  message("***************FIX THE FOLLOWING RECORDS***************", print_and_capture(output[1:8]))
+} else {
+    message("***************No manual fixes required***************")}
+```
+       
+       
