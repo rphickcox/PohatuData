@@ -1,0 +1,145 @@
+---
+title: "Pohatu Penguins General mapping"
+author: "Rachel Hickcox"
+date: "2023"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", "sf",
+          "readxl", "flextable", "terra", "lubridate", "tidyverse", "openxlsx", 
+          "leaflet", "htmltools", "htmlwidgets", "leaflet.extras")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+### Loading map files
+```{r}
+nz_water <- st_read("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp")
+
+#si <- st_read("../ALL_DATA/Mapping/NZ_polygon_NZTM2000_fixed.shp") 
+#siec_line <- st_read("../ALL_DATA/Mapping/Southisland_line.shp")
+nz <- st_read("../ALL_DATA/Mapping/NZ_fullcountry_NZTM2000.shp")
+bp <- st_read("../ALL_DATA/Mapping/bankspeninsula_region_marine.shp")
+nz_marine <- st_read("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp")
+bathymetry <- rast("../ALL_DATA/Mapping/bathymetry_formapping.tif")
+
+# transform to wgs 84 projection
+nz_wgs <- st_transform(nz, crs = 4326)
+bp_wgs <- st_transform(bp, crs = 4326)
+nz_marine_wgs <- st_transform(nz_marine, crs = 4326)
+
+## TO DO ACCESS GD INSTEAD?
+nestid <- read.csv("./../ALL_DATA/Data/Nest ID.csv")
+nbhoods_wgs <- st_read("../ALL_DATA/Mapping/Neighbourhoods/all_neighbourhoods_wgs.shp")
+nbhoods_wgs <- st_zm(nbhoods_wgs, drop = T, what = "ZM") #drop extra dimensions
+nestbox_wgs <- nestbox_wgs %>% 
+  mutate(Neighborho = str_replace_all(Neighborho, "Dagobah System", "The Dagobah System"), 
+         Neighborho = str_replace_all(Neighborho, "Unnamed Land", "The Unnamed Land"))
+```
+
+### Nestboxes to map
+```{r nb}
+# These change depending on the folder
+activenests <- nestid %>% 
+  mutate(Neighborhood = str_replace_all(Neighborhood, "Dagobah System", "The Dagobah System"), 
+         Neighborhood = str_replace_all(Neighborhood, "Unnamed Land", "The Unnamed Land")) %>% 
+  dplyr::filter(!str_detect(Nest.ID, "^DUD"), 
+                !is.na(Lat)) %>% 
+  arrange(Neighborhood, Nest.ID)
+shp_nests <- st_as_sf(activenests, coords = c("Lon", "Lat"), crs = 2193)
+shp_nests_wgs <- st_transform(shp_nests, crs = 4326)
+
+activenests_sum <- activenests %>% 
+  group_by(Neighborhood) %>% 
+  summarise(n = n())
+
+nbhoods_wgs <-  left_join(nbhoods_wgs, activenests_sum, by = c("layer" = "Neighborhood")) 
+
+bsite <- "Pohatu" 
+
+nbhoods_df <- st_coordinates(nbhoods_wgs)
+```
+
+### Leaflet map
+```{r leafletm1}
+colours2 <- colorFactor(
+  #palette = topo.colors(20), 
+  palette = rainbow(20), 
+  domain = nbhoods_wgs$layer)
+
+map <- 
+leaflet() %>%
+  fitBounds(173.0035,-43.871,173.01,-43.867) %>% 
+  addProviderTiles("Esri.WorldImagery", group = "Esri.WorldImagery") %>% 
+  #Neighbourhoods
+  addPolygons(data = nbhoods_wgs, 
+              group = "Neighbourhoods",
+              fillColor = "transparent",
+              color = ~colours2(nbhoods_wgs$layer),
+              opacity = 1,
+              fillOpacity = 0,
+              weight = 2, 
+              highlightOptions = highlightOptions(color = "white", weight = 3, bringToFront = TRUE), 
+              popup = ~paste("<h3 style='color: red'>",layer,"</h3>","<b>Number of nests:</b>",n,"<br>","<b>", sep=" "), 
+              label = ~nbhoods_wgs$layer) %>% 
+  # Nestboxes
+  addCircleMarkers(data = activenests, 
+                   lat = ~Lat, lng = ~Lon, 
+                   group = "Nests",
+                   radius = 3, 
+                   label = ~activenests$Nest.ID,
+                   popup =  paste("<b>Nest: ", activenests$Nest.ID, "<br>",
+                                  "<b>Neighbourhood: ", activenests$Neighborhood, "<br>",
+                                  "<img src = ", activenests$Image.http, " width='100'>"), 
+                   color = ~colours2(activenests$Neighborhood),
+                   stroke = FALSE, fillOpacity = 1) %>% 
+  addLayersControl(overlayGroups = c("Neighbourhoods", "Nests"),    
+                   options = layersControlOptions(collapsed = FALSE)) %>% 
+  # To search
+  addMarkers(data = activenests, lat = ~Lat, lng = ~Lon, 
+             group = "Nests_search",
+             label = ~activenests$Nest.ID,
+             popup =  paste("<b>Nest: ", activenests$Nest.ID, "<br>",
+                            "<b>Neighbourhood: ", activenests$Neighborhood, "<br>",
+                            "<img src = ", activenests$Image.http, " width='100'>"), 
+             icon = makeIcon(iconUrl = "https://www.flaticon.com/free-icon/penguin_3673523", 
+                             iconWidth = 1, iconHeight = 1)) %>% 
+  addSearchFeatures(targetGroups = "Nests_search", 
+                    options = searchFeaturesOptions(openPopup = TRUE, 
+                                                    zoom = 60, 
+                                                    position = "topright", 
+                                                    textPlaceholder = "SEARCH FOR A NESTBOX",
+                                                    collapsed = FALSE,
+                                                    #firstTipSubmit = TRUE,
+                                                    #autoCollapse = TRUE, 
+                                                    hideMarkerOnCollapse = T)) %>% 
+  #  hideGroup("Nests") %>% 
+  #  hideGroup("Nests_search") %>% 
+  addMiniMap(zoomLevelOffset = -6, 
+             position = "bottomleft", 
+             toggleDisplay = TRUE) %>%   
+  addResetMapButton() %>%
+  addScaleBar(position = "bottomright") 
+# addEasyButton(easyButton(
+#   icon="fa-crosshairs", title = "Locate me", 
+#   onClick=JS("function(btn, map){ map.locate({setView: true}); }")))
+
+saveWidget(map, file = "Maps/nbhood_nest_map.html")
+
+```
+
+# Some code for rendering map in shiny app
+```{r shiny}
+
+# 
+# #<iframe src="index.html" frameborder="0" width="50%" height="200px"></iframe>
+# 
+
+```

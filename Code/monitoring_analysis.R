@@ -1,25 +1,14 @@
----
-title: "Pohatu Penguins Monitoring Data Analysis"
-author: "Rachel Hickcox"
-date: "2022"
-email: "rphickcox@gmail.com"
-editor_options: 
-  chunk_output_type: console
----
-
-### Load packages
-```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+## ----pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE--------------------------------------------------------------------------
 pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
-          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse")
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse", "openxlsx")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 invisible(lapply(pkgs, library, character.only = TRUE))
 rm(list = c("pkgs", "new.packages"))
 options(scipen = 999)
-```
 
-### Connecting to Google Drive
-```{r googledrive}
+
+## ----googledrive------------------------------------------------------------------------------------------------------------------------
 drive_auth(email = "pohatumonitoring@gmail.com")
 
 drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
@@ -36,10 +25,9 @@ drive_download(file = "https://docs.google.com/spreadsheets/d/16c4c5nXbz_PFf7iyN
                overwrite = TRUE, 
                path = "Bird ID.xlsx")
 birdid <- read_excel("Bird ID.xlsx")
-```
 
-### Setup
-```{r setup}
+
+## ----setup------------------------------------------------------------------------------------------------------------------------------
 # Dates
 tdt <- floor_date(today(), "weeks", week_start = 1)
 tdt_d <- format(tdt, "%d-%m-%Y")
@@ -47,10 +35,9 @@ tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", ""))
 yr <- ifelse(month(today()) > 8, year(today()), year(today())-1)
 start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1)
 dates_df <- seq(start, today(), 7)
-```
 
-### Nests summary
-```{r nests}
+
+## ----nests------------------------------------------------------------------------------------------------------------------------------
 # Nest coords 
 nestid_coord <- nestid %>%
   tidyr::separate(Location, into = c("Lat", "Long"), ",") %>%
@@ -103,7 +90,7 @@ nests <- monitor %>%
                            lead(`Nest activity`) == "Uplifted", lag(Status), Status),
          nn = unlist(nn))  %>% 
   filter(!is.na(Status), is.na(nn)) %>% 
-  select(-c(n, n1, n2, nn))
+  dplyr::select(-c(n, n1, n2, nn))
 
 # Failed nests 
 failed_nests <- nests %>%
@@ -111,10 +98,9 @@ failed_nests <- nests %>%
   dplyr::select(`Nest ID`, `Nest activity`, DateTime) %>% 
   arrange(`Nest ID`, DateTime)
 #clipr::write_clip(failed_nests)
-```
 
-### Nests with eggs
-```{r}
+
+## ---------------------------------------------------------------------------------------------------------------------------------------
 eggs <- nests %>% 
   filter(Eggs != 0 & Status != "Chicks") %>% 
   dplyr::select(DateTime, `Nest ID`, Status, Est_LayDate:Est_HatchDate, 
@@ -144,12 +130,11 @@ eggs <- nests %>%
          Notes = paste0(Notes, collapse = "")) %>% 
   filter(Status != "Failed") %>% 
   filter(nn == max(nn)) %>% 
-  select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
+  dplyr::select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
   rename("Status" = "Status2")
-```
 
-### Nests with chicks
-```{r}
+
+## ---------------------------------------------------------------------------------------------------------------------------------------
 chicks <- nests %>% 
   filter(Status != "Eggs") %>% 
   group_by(`Nest ID`) %>% 
@@ -193,13 +178,12 @@ chicks <- nests %>%
   filter(Status %in% c("Chicks", "Failed")) %>% 
   filter(nn == max(nn)) %>% 
   mutate(Chicks_2 = ifelse(Status2 == "Failed", 0, Chicks_2)) %>% 
-  select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
+  dplyr::select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
   rename("Status" = "Status2") %>% 
   distinct()
-```
 
-### Eggs + Chicks + Totals
-```{r}
+
+## ---------------------------------------------------------------------------------------------------------------------------------------
 combo_nests <- eggs %>% 
   full_join(chicks[c(1, 4, 8:15)], by = "Nest ID", suffix = c("e", "")) %>% 
   mutate(Status = ifelse(is.na(Status), Statuse, Status)) %>%  
@@ -207,7 +191,7 @@ combo_nests <- eggs %>%
   mutate(Comments = str_squish(Comments),
          NLaid = pmax(Eggs_1, Eggs_2, na.rm = T), 
          NHatched = pmax(Chicks_1, Chicks_2, na.rm = T)) %>% 
-  select(c(`Nest ID`, Status, Est_LayDate, Est_HatchDate, HatchDate, UpliftDate, Est_FledgeDate, FledgeDate, Eggs_1, Eggs_2, NLaid, diffeggs, Chicks_1, Chicks_2, NHatched, diffchicks, Comments))
+  dplyr::select(c(`Nest ID`, Status, Est_LayDate, Est_HatchDate, HatchDate, UpliftDate, Est_FledgeDate, FledgeDate, Eggs_1, Eggs_2, NLaid, diffeggs, Chicks_1, Chicks_2, NHatched, diffchicks, Comments))
 
 # TOTALS
 totals <- combo_nests %>% 
@@ -221,10 +205,9 @@ totals <- combo_nests %>%
             Chicks_fledged = sum(Chicks_2, na.rm = T), 
             Chicks_perpair = Chicks_fledged/Total_nests, 
             Chicks_peradult = Chicks_fledged/(Total_nests*2))
-```
 
-### Adding parent and chick marking data to dataframes
-```{r}
+
+## ---------------------------------------------------------------------------------------------------------------------------------------
 birdid_chicks <- birdid %>%
   filter(`Nest ID_marking` %in% chicks$`Nest ID`) %>% 
   dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`)) %>% 
@@ -249,90 +232,96 @@ nests_outcome <- birdid_chicks %>%
   arrange(`Nest ID`) %>% 
   ungroup() %>% 
   mutate_if(is.numeric, as.character) %>%
-  mutate_if(is.Date, format, format = "%b %d") %>% 
+  mutate_if(is.Date, format, format = "%d/%m/%Y") %>% 
+  mutate_all(as.character)  %>% 
   mutate(NestYear = yr,
          SeasonID = paste0(NestYear, `Nest ID`), .before = 1) %>% 
-  mutate(EC1Fate = NA, EC2Fate = NA, EC1Treatment = NA, EC2Treatment = NA, .before = Comments) %>% 
+  mutate(EC1Fate = NA, EC2Fate = NA, EC1Intervention = NA, EC2Intervention = NA, .before = Comments) %>% 
   relocate(c(Chick1, Chick2, Est_LayDate:FledgeDate), .before = Comments) %>% 
-  select(-Unknown1)
+  relocate(NHatched, .before = NFledged) %>% 
+  dplyr::select(-Unknown1) %>% 
+  rename('NestID' = `Nest ID`, "Adult1ID" = "Adult1", "Adult2ID" = "Adult2", 
+         "Chick1ID" = "Chick1", "Chick2ID" = "Chick2", "Nvisits" = "nvisits") %>% 
+  mutate(across(ends_with(c("1ID", "2ID")), str_replace_na, "UM"))
 
-write.csv(nests_outcome, paste0("Pohatu_LPDB/BreedingSeason_", yr, "_finalsummary.csv"), 
-          row.names = FALSE)
-```
+#write.csv(nests_outcome, paste0("Pohatu_LPDB/BreedingSeason_", yr, "_finalsummary.csv"), row.names = FALSE)
+
+openxlsx::write.xlsx(nests_outcome, paste0("Pohatu_LPDB/BreedingSeason_", yr, "_finalsummary.xlsx"), sheetName = paste("Breeding season", yr, sep = "_"), 
+                     colNames = TRUE, rowNames = FALSE, append = FALSE)
 
 
+## ---------------------------------------------------------------------------------------------------------------------------------------
+moult <- monitor %>%
+  filter(`Nest activity` == "Moulting")
+
+length(unique(moult$`Adult 1`))
+length(unique(moult$`Nest ID`))
+
+markedmoult <- moult %>% 
+  filter(!is.na(`Adult 1`) | !is.na(`Adult 2`) | 
+           !is.na(`Adult 3`) | !is.na(`Adult 4`)) %>% 
+  select(`Nest ID`, `Adult 1`, `Adult 2`) %>% 
+  pivot_longer(c(`Adult 1`, `Adult 2`), names_to = "n", values_to = "AdultID") %>% 
+  filter(!is.na(AdultID)) %>% 
+  select(-n) %>% 
+  distinct()
+
+notmoulted <- birdid %>% 
+    select(`Nest ID_marking`, `Bird ID`, Age_marking) %>% 
+  filter(!`Bird ID` %in% markedmoult$AdultID) %>% 
+  filter(Age_marking != "Chick") 
 
 
+## ---------------------------------------------------------------------------------------------------------------------------------------
+breeding <- read_excel("Pohatu_LPDB/BreedingSeason_2022_finalsummary_edited.xlsm")
 
 
-
-### Weights
-#### THERE ARE PROBLEMS HERE THAT NEED FIXING
-```{r}
-# nests where chicks fledged
-xx <- chicksfledge %>% 
-  select(`Nest ID`, Status)
-# nests failed
-xxx <- failed_nests %>% 
-  filter(`Nest activity` == "FAILED")
-
-# filtering out failed nests
-weights_nests <- nests %>%
-  group_by(`Nest ID`) %>% 
-  #filter(row_number() < max(which("Nest Activity" == "FAILED")))
-  #merging with failed nests to identify rows of failed nests
-  left_join(data.frame("Nest ID" = xxx$`Nest ID`, 
-                       "Failed" = xxx$DateTime), 
-            by = c("Nest ID" = "Nest.ID")) %>% 
-  filter(is.na(Failed)) %>%  
-  #group_by(`Nest ID`, Failed) %>% 
-  left_join(chicks[c(1,5)], by = "Nest ID") %>% 
-  select(c(1,2,4,14:19,23)) %>% 
-  mutate(HatchDate = as.Date(HatchDate), 
+## ---------------------------------------------------------------------------------------------------------------------------------------
+temp <- nests %>% 
+  select(-starts_with("Chick 2")) %>% 
+  left_join(breeding[c(3, 6, 18:21)], by = c("Nest ID" = "NestID")) %>% 
+  mutate(across(c(HatchDate:FledgeDate), str_replace_all, "/", "-"), 
+         across(c(HatchDate:FledgeDate), as.Date, "%d-%m-%Y")) %>% 
+  mutate(`Chick 1 ID` = ifelse(is.na(`Chick 1 ID`), "c1", `Chick 1 ID`), 
          days_hatch = difftime(DateTime, HatchDate, units = "days"), 
          weeks_hatch = round(as.numeric(days_hatch)/7, 1)) %>% 
-  filter(!is.na(`Chick 1 weight`)) %>% 
-  #fledged nests
-  left_join(xx, by = "Nest ID", suffix = c("2", "")) %>% 
-  mutate(Status = ifelse(is.na(Status), "Active", Status), 
-         Status = ifelse(Status2 == "Uplifted", "Uplifted", Status))
-
-
-temp <- weights_nests %>% 
-  select(-starts_with("Chick 2")) %>% 
-  mutate(`Chick 1 ID` = ifelse(is.na(`Chick 1 ID`), "c1", `Chick 1 ID`)) %>% 
   rename("ID" = `Chick 1 ID`, "Fate" = `Chick 1 status`, "Weight" = `Chick 1 weight`)
 
-weights_chick <- weights_nests %>% 
+weights_chick <- nests %>% 
   select(-starts_with("Chick 1")) %>% 
+  left_join(breeding[c(3, 6, 18:21)], by = c("Nest ID" = "NestID")) %>% 
+  mutate(across(c(HatchDate:FledgeDate), str_replace_all, "/", "-"), 
+         across(c(HatchDate:FledgeDate), as.Date, "%d-%m-%Y")) %>% 
   mutate(`Chick 2 ID` = ifelse(is.na(`Chick 2 ID`), "c2", `Chick 2 ID`)) %>% 
   rename("ID" = `Chick 2 ID`, "Fate" = `Chick 2 status`, "Weight" = `Chick 2 weight`) %>% 
   bind_rows(temp) %>% 
   arrange(`Nest ID`, ID) %>% 
   filter(!is.na(Weight)) %>% 
   mutate(days_hatch = as.numeric(days_hatch)) %>% 
-  unite(col = ID, `Nest ID`, ID, sep = "-", remove = FALSE, na.rm = TRUE) %>% 
-  mutate(Underweight = ifelse(Weight <= 700 & days_hatch >= 42, "Concern", "Ok"), 
-         Underweight = ifelse(Weight <= 600 & days_hatch >= 42, "Intervene", Underweight)) %>% 
-  select(-Status2)
+  unite(col = ID, `Nest ID`, ID, sep = "-", remove = FALSE, na.rm = TRUE) #%>% 
+#mutate(Underweight = ifelse(Weight <= 700 & days_hatch >= 42, "Concern", "Ok"), 
+#       Underweight = ifelse(Weight <= 600 & days_hatch >= 42, "Intervene", Underweight)) %>% 
+#select(-Status2)
 clipr::write_clip(weights_chick)
 
 ggplot(data = weights_chick, aes(x = days_hatch, y = Weight, 
-                                 shape = Status, 
+                                 #shape = Status, 
+                                 color = `Nest ID`, 
+                                 group = ID))
+
+ggplot(data = weights_chick, aes(x = DateTime, y = Weight, 
+                                 #shape = Status, 
                                  color = `Nest ID`, 
                                  group = ID)) +
   geom_point() +
-  geom_line() +
+  #geom_line() +
   geom_rug() +
   theme_minimal() +
   guides(color = FALSE)
 
-```
 
-### Upload files to Google Drive
-#### This can also be executed in KororaShiny (https://rphickcox.shinyapps.io/pohatuapp/) and 
-#### C:\Users\rphic\OneDrive\Documents\GitHub\KororaShiny\PohatuApp.Rproj
-```{r upload}
+
+## ----upload-----------------------------------------------------------------------------------------------------------------------------
 x <- gs4_find("Notifications")
 
 tobind <- birdid_chicks[c(1, 15, 11, 12, 13, 16)]
@@ -357,10 +346,9 @@ temp <- read_sheet(x) %>%
   select(-c(n, nn))
 
 write_sheet(temp, ss = x, sheet = "Notifications")
-```
 
-### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
-```{r birdid}
+
+## ----birdid-----------------------------------------------------------------------------------------------------------------------------
 x <- data.frame(matrix(ncol = 25, nrow = nrow(birdid)))
 x[is.na(x)] <- ""
 
@@ -427,9 +415,9 @@ marking_fix %>%
   summarise(Age = unique(Age), 
             Count = n())
 
-```
 
-```{r}
+
+## ---------------------------------------------------------------------------------------------------------------------------------------
 ecfate <- read_excel("nests_ecfate_18112022.xlsx")
 ecfate$code <- as.factor(ecfate$code)
 #ccord <- ecfate %>% filter(!is.na(Lat))
@@ -459,5 +447,4 @@ saveWidget(x, selfcontained = T, file = "~/map_activefailednests.html")
 
 resfactor <- 3
 png(filename=x, res = 72*resfactor, height=640*resfactor, width=640*resfactor)
-```
 
