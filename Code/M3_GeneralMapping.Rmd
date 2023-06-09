@@ -20,7 +20,7 @@ options(scipen = 999)
 ```
 
 ### Loading map files
-```{r loading}
+```{r loading }
 nz_water <- st_read(here("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp"))
 
 #si <- st_read("../ALL_DATA/Mapping/NZ_polygon_NZTM2000_fixed.shp") 
@@ -66,6 +66,15 @@ nbhoods_df <- st_coordinates(nbhoods_wgs)
 
 ### Leaflet map
 ```{r leafletm1}
+
+
+library(widgetframe)
+
+# Create  string for responsiveness that will be injected in the <head> section of the leaflet output html file. Note that the quotes were escaped using the backslash character : `\`.  
+responsiveness < "\'<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\'"
+
+
+
 colours2 <- colorFactor(
   #palette = topo.colors(20), 
   palette = rainbow(20), 
@@ -123,12 +132,18 @@ leaflet() %>%
              position = "bottomleft", 
              toggleDisplay = TRUE) %>%   
   addResetMapButton() %>%
-  addScaleBar(position = "bottomright") 
+  addScaleBar(position = "bottomright") %>% 
+  # add the javascript for responsivness
+htmlwidgets::onRender(paste0("
+    function(el, x) {
+      $('head').append(",responsiveness,");
+    }"))
 # addEasyButton(easyButton(
 #   icon="fa-crosshairs", title = "Locate me", 
 #   onClick=JS("function(btn, map){ map.locate({setView: true}); }")))
 
-saveWidget(map, file = here("Maps/nbhood_nest_map.html"), selfcontained = TRUE)
+#saveWidget(map, file = here("index.html"), selfcontained = TRUE)
+htmlwidgets::saveWidget(frameableWidget(map), here("index.html")) 
 ```
 
 # Some code for rendering map in shiny app
