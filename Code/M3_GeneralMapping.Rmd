@@ -1,9 +1,9 @@
 ---
 title: "Pohatu Penguins General mapping"
 author: "Rachel Hickcox"
-date: "2023"
-email: "rphickcox@gmail.com"
-editor_options: 
+date: '2023'
+email: rphickcox@gmail.com
+editor_options:
   chunk_output_type: console
 ---
 
@@ -11,7 +11,7 @@ editor_options:
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
 pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", "sf",
           "readxl", "flextable", "terra", "lubridate", "tidyverse", "openxlsx", 
-          "leaflet", "htmltools", "htmlwidgets", "leaflet.extras")
+          "leaflet", "htmltools", "htmlwidgets", "leaflet.extras", "mapview", "here")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -20,15 +20,15 @@ options(scipen = 999)
 ```
 
 ### Loading map files
-```{r}
-nz_water <- st_read("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp")
+```{r loading}
+nz_water <- st_read(here("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp"))
 
 #si <- st_read("../ALL_DATA/Mapping/NZ_polygon_NZTM2000_fixed.shp") 
 #siec_line <- st_read("../ALL_DATA/Mapping/Southisland_line.shp")
-nz <- st_read("../ALL_DATA/Mapping/NZ_fullcountry_NZTM2000.shp")
-bp <- st_read("../ALL_DATA/Mapping/bankspeninsula_region_marine.shp")
-nz_marine <- st_read("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp")
-bathymetry <- rast("../ALL_DATA/Mapping/bathymetry_formapping.tif")
+nz <- st_read(here("./../ALL_DATA/Mapping/NZ_fullcountry_NZTM2000.shp"))
+bp <- st_read(here("./../ALL_DATA/Mapping/bankspeninsula_region_marine.shp"))
+nz_marine <- st_read(here("./../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp"))
+bathymetry <- rast(here("./../ALL_DATA/Mapping/bathymetry_formapping.tif"))
 
 # transform to wgs 84 projection
 nz_wgs <- st_transform(nz, crs = 4326)
@@ -36,12 +36,9 @@ bp_wgs <- st_transform(bp, crs = 4326)
 nz_marine_wgs <- st_transform(nz_marine, crs = 4326)
 
 ## TO DO ACCESS GD INSTEAD?
-nestid <- read.csv("./../ALL_DATA/Data/Nest ID.csv")
-nbhoods_wgs <- st_read("../ALL_DATA/Mapping/Neighbourhoods/all_neighbourhoods_wgs.shp")
+nestid <- read.csv(here("./../ALL_DATA/Data/Nest ID.csv"))
+nbhoods_wgs <- st_read(here("./../ALL_DATA/Mapping/Neighbourhoods/all_neighbourhoods_wgs.shp"))
 nbhoods_wgs <- st_zm(nbhoods_wgs, drop = T, what = "ZM") #drop extra dimensions
-nestbox_wgs <- nestbox_wgs %>% 
-  mutate(Neighborho = str_replace_all(Neighborho, "Dagobah System", "The Dagobah System"), 
-         Neighborho = str_replace_all(Neighborho, "Unnamed Land", "The Unnamed Land"))
 ```
 
 ### Nestboxes to map
@@ -131,8 +128,7 @@ leaflet() %>%
 #   icon="fa-crosshairs", title = "Locate me", 
 #   onClick=JS("function(btn, map){ map.locate({setView: true}); }")))
 
-saveWidget(map, file = "Maps/nbhood_nest_map.html")
-
+saveWidget(map, file = here("Maps/nbhood_nest_map.html"), selfcontained = TRUE)
 ```
 
 # Some code for rendering map in shiny app
