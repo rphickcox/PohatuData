@@ -48,11 +48,13 @@ birdid <- read_excel("./../ALL_DATA/Bird ID.xlsx")
 ### Setup
 ```{r setup}
 # Dates
-tdt <- floor_date(today(), "weeks", week_start = 1)
-tdt_d <- format(tdt, "%d-%m-%Y")
-tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", ""))
-yr <- ifelse(month(today()) > 8, year(today()), year(today())-1)
-start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1)
+tdt <- floor_date(today(), "weeks", week_start = 1) # lubridate start of week
+tdt_d <- format(tdt, "%d-%m-%Y") # character today's start of week date 
+tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", "")) # string
+yr <- ifelse(month(today()) > 8, year(today()), year(today())-1) # yr
+start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1) # start date
+end <- as.Date(paste0("01-09-", yr + 1), "%d-%m-%Y")
+non_br <- as.Date(paste0("01-04-", yr + 1), "%d-%m-%Y")
 dates_df <- seq(start, today(), 7)
 ```
 
@@ -232,22 +234,29 @@ totals <- combo_nests %>%
 
 ### Adding parent and chick marking data to dataframes
 ```{r parentid}
-birdid_chicks <- birdid %>%
+birdid_all <- birdid %>%
   filter(`Nest ID_marking` %in% chicks$`Nest ID`) %>% 
-  dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`)) %>% 
+  dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`, DateTime_marking)) %>% 
+  mutate(Year = ifelse(DateTime_marking >= start & 
+                         DateTime_marking <= end, yr, year(DateTime_marking))) %>% 
+  dplyr::select(-DateTime_marking) %>% 
   group_by(`Nest ID_marking`, Age_marking) %>% 
   mutate(n = row_number()) %>% 
   unite(nn, Age_marking, n, sep = "") 
 
-cols <- rep(NA_real_, length(unique(birdid_chicks$nn)))
-names(cols) <- rbind(sort(unique(birdid_chicks$nn)))
+birdid_chicks <- birdid_all %>% 
+  filter(Year == yr, 
+         nn %in% c("Chick1", "Chick2"))
+
+cols <- rep(NA_real_, length(unique(birdid_all$nn)))
+names(cols) <- rbind(sort(unique(birdid_all$nn)))
 
 # number of visits
 nvisits <- nests %>% 
   group_by(`Nest ID`) %>% 
   summarise(nvisits = max(row_number()))
 
-nests_outcome <- birdid_chicks %>%
+nests_outcome <- birdid_all %>%
   pivot_wider(names_from = nn, values_from = `Bird ID`) %>% 
   tibble::add_column(!!!cols[!names(cols) %in% names(.)]) %>%
   right_join(combo_nests, by = c("Nest ID_marking" = "Nest ID")) %>% 
@@ -299,6 +308,25 @@ notmoulted <- birdid %>%
   filter(!`Bird ID` %in% markedmoult$AdultID) %>% 
   filter(Age_marking != "Chick") 
 ```
+
+### Getting information about resights
+```{r resight}
+cc <- c("Adult 1", "Adult 2", "Adult 3", "Adult 4", 
+         "Chick 1 ID", "Chick 2 ID", "Chick 3 ID", "Chick 4 ID")
+
+resight <- monitor %>%
+  select(DateTime, `Nest ID`, all_of(cc) , Image.http) %>% 
+  filter(DateTime >= start & DateTime <= end) %>%
+  pivot_longer(all_of(cc), names_to = "n", values_to = "BirdID") %>% 
+  group_by(BirdID) %>% 
+ filter(!is.na(BirdID), DateTime == max(DateTime, na.rm = T)) %>%
+  mutate(n = str_replace_all(n, " ID", ""))
+
+
+chick_resights <- resight %>% 
+  filter(DateTime >= non_br & DateTime <= end) %>% 
+  filter(BirdID %in% birdid_chicks$`Bird ID`)
+```  
 
 ### Reading in cleaned yearly summary of breeding
 ```{r cleanedsum}
