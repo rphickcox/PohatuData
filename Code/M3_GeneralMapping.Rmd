@@ -9,8 +9,8 @@ editor_options:
 
 ### Load packages
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
-pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", "sf",
-          "readxl", "flextable", "terra", "lubridate", "tidyverse", "openxlsx", 
+pkgs <- c("knitr", "kableExtra", "broom", "sf","terra",
+          "readxl", "flextable",  "lubridate", "tidyverse", "openxlsx", 
           "leaflet", "htmltools", "htmlwidgets", "leaflet.extras", "mapview", "here")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)

@@ -328,6 +328,13 @@ chick_resights <- resight %>%
   filter(BirdID %in% birdid_chicks$`Bird ID`)
 ```  
 
+```{r}
+xxx <- monitor %>% 
+  filter(DateTime>=tdt-7, 
+         `Nest activity` != "Empty")
+  
+```
+
 ### Reading in cleaned yearly summary of breeding
 ```{r cleanedsum}
 breeding <- read_excel("./../ALL_DATA/Data/BreedingSeason_2022_finalsummary_edited.xlsm")
