@@ -30,7 +30,7 @@ monitor <- read_excel("Monitoring.xlsx")
 
 # SETUP
 ```{r}
-date_before <- as.Date("2022-11-30")
+date_before <- as.Date("2023-07-01")
 
 files_drive1 <- drive_ls(path = "Monitoring.files")
 save_to <- "D:/Monitoring_photos" # THIS MAY CHANGE
@@ -65,7 +65,7 @@ files_drive <- files_drive1 %>%
   mutate(Date = str_replace_all(name, '.jpg', ""), 
          Date = str_replace_all(Date, '\\.', ":"),  
          Date = as.Date(Date)) %>% 
-  filter(Date < date_before)
+ dplyr::filter(Date < date_before)
 
 # List of monitoring records with images in files_drive
 to_download <- monitor %>%
@@ -75,7 +75,7 @@ to_download <- monitor %>%
   mutate(pathname = str_split(Image, "/+"), 
          pathname = map_chr(pathname, ~.x[length(.x)]), 
          newpath = paste(`Nest ID`, pathname, sep = " ")) %>%  # get just path name
-  filter(!is.na(Image), pathname %in% files_drive$name) %>% 
+  filter(!is.na(Image),!is.na(Image.http), pathname %in% files_drive$name) %>% 
   mutate(n = row_number())
 
 files_drive <- filter(files_drive, files_drive$name %in% to_download$pathname)
@@ -94,18 +94,8 @@ lapply(ls_down, FUN = archive.photo,
        to_download = to_download, save_to = save_to, 
        nmax = length(ls_down))
 beep()
-```
-
-# EXECUTING DELETE FUNCTION
-```{r}
-# Delete image
-lapply(ls_down, FUN = delete.photo)
-beep()
-```
-
 
 # Saving file with new names 
-```{r}
 xx <- read.csv(file.path(save_to, "Photonames_archivedfromGoogleDrive.csv"))
 to_download <- to_download[1:7]
 names(xx) <- names(to_download)
@@ -114,5 +104,12 @@ xx <- distinct(xx)
 write.csv(xx, 
           file.path(save_to, "Photonames_archivedfromGoogleDrive.csv"), 
           row.names = FALSE)
+```
+
+# EXECUTING DELETE FUNCTION
+```{r}
+# Delete image
+lapply(ls_down, FUN = delete.photo)
+beep()
 ```
 
