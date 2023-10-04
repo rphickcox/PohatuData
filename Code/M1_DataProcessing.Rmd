@@ -75,9 +75,10 @@ nestid_coord <- nestid %>%
 
 nests <- monitor %>%
   mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1),
+         FullID = paste0(NestYear, `Nest ID`), 
          Eggs = ifelse(is.na(Eggs), 0, as.numeric(Eggs)), 
          Chicks = ifelse(is.na(Chicks), 0, as.numeric(Chicks))) %>%  
-  group_by(NestYear, `Nest ID`) %>%
+  group_by(FullID) %>%
   arrange(`Nest ID`, DateTime) %>%
   mutate(n = row_number()) %>%
   mutate(n1 = ifelse(`Nest activity` == "Eggs/Chicks present", n, NA)) %>%
@@ -94,7 +95,7 @@ nests <- monitor %>%
          Date_last = difftime(as.Date(DateTime), as.Date(Date_last), units = "days"), 
          Est_LayDate = as.Date(min(DateTime, na.rm = TRUE))) %>%
   mutate(.after = Est_LayDate, Est_HatchDate = Est_LayDate + 35) %>% 
-  dplyr::select(NestYear, `Nest ID`, Date_last:Est_HatchDate, `Nest activity`:`Adult 1`, 
+  dplyr::select(NestYear, FullID, `Nest ID`, Date_last:Est_HatchDate, `Nest activity`:`Adult 1`, 
                 `Adult 2`, Eggs:`Chick 1 weight`, `Chick 2 ID`:`Chick 2 weight`,
                 Notes, n, n1) %>%
   mutate(Status = ifelse(Eggs > 0, "Eggs", NA), 
@@ -102,11 +103,11 @@ nests <- monitor %>%
          .before = 2) %>% 
   left_join(nestid_coord, by = "Nest ID") %>% 
   mutate(n2 = lag(Chicks)) %>% 
-  group_by(`Nest ID`) %>% 
+  group_by(FullID) %>% 
   mutate(`Nest activity` = ifelse(lag(`Nest activity`) == "FAILED" & 
                                     `Nest activity` == "FAILED", NA, `Nest activity`),
-         Status = ifelse(is.na(`Nest activity`), NA, Status)) %>% 
-  mutate(Status = ifelse(is.na(n1) & n2 > 0, "Fledged", Status),
+         Status = ifelse(is.na(`Nest activity`), NA, Status),
+         Status = ifelse(is.na(n1) & n2 > 0, "Fledged", Status),
          Status = ifelse(`Nest activity` == "FAILED", "Failed", Status), 
          Status = ifelse(`Nest activity` == "Uplifted", `Nest activity`, Status),
          #if failed followed by empty, removing all empty rows (i.e., did not fledge)
@@ -118,7 +119,9 @@ nests <- monitor %>%
          #if row fledged but was previously uplifted, changing status to the previous status (i.e., did not fledge before uplift)
          Status = ifelse(Status == "Fledged" & 
                            lead(`Nest activity`) == "Uplifted", lag(Status), Status),
-         nn = unlist(nn))  %>% 
+         nn = unlist(nn), 
+         NHatched = ifelse(max(Chicks, na.rm = T) > 2, 2, max(Chicks, na.rm = T)), 
+         NLaid = ifelse(NHatched == 2, 2, max(Eggs, na.rm = T))) %>% 
   filter(!is.na(Status), is.na(nn)) %>% 
   dplyr::select(-c(n, n1, n2, nn))
 ```
@@ -128,8 +131,11 @@ nests <- monitor %>%
 # Failed nests 
 failed_nests <- nests %>%
   filter(Status == "Failed") %>% # | Status == "Uplifted") %>%
-  dplyr::select(NestYear, `Nest ID`, `Nest activity`, DateTime) %>% 
-  arrange(NestYear, `Nest ID`, DateTime)
+  #dplyr::select(NestYear, `Nest ID`, `Nest activity`, DateTime) %>% 
+  dplyr::select(-c(Date_last, Week, `Nest activity`)) %>% 
+  arrange(NestYear, `Nest ID`, DateTime) %>%
+  group_by(FullID) %>% 
+  filter(DateTime == min(DateTime))
 #clipr::write_clip(failed_nests)
 ```
 
@@ -137,10 +143,10 @@ failed_nests <- nests %>%
 ```{r eggs}
 eggs <- nests %>% 
   filter(Eggs != 0 & Status != "Chicks") %>% 
-  dplyr::select(NestYear, DateTime, `Nest ID`, Status, Est_LayDate:Est_HatchDate, 
-                Eggs, Chicks, Notes) %>% 
+  dplyr::select(NestYear, DateTime, FullID, `Nest ID`, Status, Est_LayDate:Est_HatchDate, 
+                Eggs, Chicks, NLaid, NHatched, Notes) %>% 
   distinct(across(NestYear:Chicks), .keep_all = T) %>%
-  group_by(NestYear, `Nest ID`) %>% 
+  group_by(FullID) %>% 
   arrange(NestYear, `Nest ID`, DateTime) %>% 
   mutate(HatchDate = NA, .after = Est_HatchDate, 
          Est_TranspondDate5 = Est_HatchDate + 35,
@@ -166,19 +172,22 @@ eggs <- nests %>%
   dplyr::select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
   rename("Status" = "Status2")
 
-# failed_eggs <- eggs %>% 
-#   filter(Status == "Failed") %>%
-#   mutate(across(Est_TranspondDate5:Est_FledgeDate, ~NA))
-# 
-# eggs <- eggs %>%
-#   filter(Status != "Failed")
+failed_eggs <- eggs %>% 
+  filter(Status == "Failed") %>%
+  mutate(across(Est_TranspondDate5:Est_FledgeDate, ~NA),
+         Status = "Failed-eggs",
+         Comments = str_squish(Comments))
+
+eggs <- eggs %>%
+  filter(Status != "Failed")
 ```
 
 ### Nests with chicks
 ```{r chicks}
 chicks <- nests %>% 
   filter(!Status %in% "Eggs") %>% 
-  group_by(NestYear, `Nest ID`) %>% 
+  filter(!FullID %in% failed_eggs$FullID) %>% 
+  group_by(FullID) %>% 
   mutate(HatchDate = min(DateTime), .after = Est_HatchDate,
          Est_TranspondDate5 = HatchDate + 35,
          Est_TranspondDate6 = HatchDate + 42,
@@ -189,9 +198,9 @@ chicks <- nests %>%
          UpliftDate = ifelse(Status == "Uplifted", as.character(DateTime), NA),
          UpliftDate = as.Date(UpliftDate)) %>%
   fill("UpliftDate" ,.direction = "downup") %>% 
-  dplyr::select(NestYear, DateTime, `Nest ID`, Status, Est_LayDate:UpliftDate, 
-                Eggs, Chicks, Notes) %>% 
-  distinct(across(c(NestYear, `Nest ID`:Chicks)), .keep_all = T) %>%
+  dplyr::select(NestYear, FullID, DateTime, `Nest ID`, Status, Est_LayDate:UpliftDate, 
+                Eggs, Chicks, NLaid, NHatched, Notes) %>% 
+  #distinct(across(c(FullID, Status:Chicks)), .keep_all = T) %>%
   arrange(NestYear, `Nest ID`, DateTime) %>% 
   mutate(Chicks_1 = lag(as.numeric(Chicks)),
          Chicks_2 = as.numeric(Chicks),
@@ -211,72 +220,107 @@ chicks <- nests %>%
                            Comments), 
          Comments = paste(Comments, collapse = " "),
          Status2 = ifelse(any(Status == "Fledged"), "Fledged", Status),
+         Status2 = ifelse(any(Status == "Failed"), "Failed", Status),
          Status2 = ifelse(any(Status =="Uplifted"), "Uplifted", Status2),
          nn = row_number(), 
          Chicks_1 = ifelse(is.na(Chicks_1) & Chicks_2 == 2, 2, Chicks_1),
-                  Chicks_1 = ifelse(is.na(Chicks_1) & Chicks_2 == 1, 1, Chicks_1),
-Notes = ifelse(!is.na(Notes), paste0(DateTime, ": ", Notes, ". "), ""), 
+         Chicks_1 = ifelse(is.na(Chicks_1) & Chicks_2 == 1, 1, Chicks_1),
+         Notes = ifelse(!is.na(Notes), paste0(DateTime, ": ", Notes, ". "), ""), 
          Notes = paste0(Notes, collapse = "")) %>% 
   filter(nn == max(nn)) %>% 
-  mutate(Chicks_2 = ifelse(Status2 == "Failed", 0, Chicks_2)) %>% 
+  mutate(Chicks_2 = ifelse(Status2 == "Failed", 0, Chicks_2), 
+         Status2 = ifelse(FullID %in% failed_nests$FullID & Status2 == "Uplifted", "Uplifted-failed", Status2)) %>% 
   dplyr::select(-c(DateTime, Eggs, Chicks, nn, Status)) %>% 
   rename("Status" = "Status2") %>% 
   distinct()
 
 # If failed at egg stage, remove
-# failed_chick <- chicks %>% 
-#   filter(Status == "Failed") %>%
-#   filter(Chicks_1 != 0 & !is.na(Chicks_1)) %>%
-# mutate(across(Est_TranspondDate5:Est_FledgeDate, ~NA))
-# 
-# 
-# chicks <- chicks %>% 
-#   filter(Status != "Failed")
+failed_chick <- chicks %>% 
+  filter(Status == "Failed" | Status == "Uplifted-failed") %>%
+  filter(!FullID %in% failed_eggs$FullID) %>%
+  mutate(across(Est_TranspondDate5:Est_FledgeDate, ~NA),
+         Status = "Failed-chicks",
+         Comments = str_squish(Comments))
+
+# If chicks uplifted (but did not fail)
+uplifted_chick <- chicks %>%
+  filter(Status == "Uplifted")
+
+# Only successful chicks
+chicks <- chicks %>% 
+  filter(Status != "Failed" , Status != "Uplifted-failed", Status != "Uplifted")
+
+#failed_nests %>% filter(!FullID %in% c(failed_eggs$FullID, failed_chick$FullID))
+
+# Checking chicks without egg record
+xx <- chicks %>% filter(!FullID %in% eggs$FullID) %>% 
+  unite("Comments", c(Comments, Notes), sep = " ")
+
 ```
 
 ### Eggs + Chicks + Totals
 ```{r ect}
-#allfailed <- rbind(failed_eggs, failed_chick)
 
 combo_nests <- eggs %>% 
-  full_join(chicks[c(1:2, 5, 9:16)], by = c("Nest ID", "NestYear"), suffix = c("e", "")) %>% 
-  group_by(NestYear, `Nest ID`) %>% 
-  arrange(NestYear, `Nest ID`) %>% 
-  mutate(Status = ifelse(is.na(Status), Statuse, Status)) %>%  
-  unite("Comments", c(Commentse, Comments, Notese, Notes), sep = " ") %>% 
-  mutate(Comments = str_squish(Comments),
-         NLaid = pmax(Eggs_1, Eggs_2, na.rm = T), 
-         NHatched = pmax(Chicks_1, Chicks_2, na.rm = T)) %>% 
-  dplyr::select(c(NestYear, `Nest ID`, Status, Est_LayDate, Est_HatchDate, HatchDate, UpliftDate, Est_FledgeDate, FledgeDate, Eggs_1, Eggs_2, NLaid, diffeggs, Chicks_1, Chicks_2, NHatched, diffchicks, Comments))
+  full_join(chicks, by = c("FullID"), suffix = c("", "x")) %>% 
+  group_by(FullID) %>% 
+  mutate(HatchDate = HatchDatex, 
+         Status = ifelse(is.na(Statusx), Status, Statusx)) %>%  
+  unite("Comments", c(Comments, Commentsx, Notes, Notesx), sep = " ") %>% 
+         #NLaid = pmax(Eggs_1, Eggs_2, na.rm = T), 
+         #NHatched = pmax(Chicks_1, Chicks_2, na.rm = T)) %>% 
+  dplyr::select(c(NestYear, `Nest ID`, Status, Est_LayDate, Est_HatchDate, HatchDate, UpliftDate, Est_FledgeDate, FledgeDate, NLaid, diffeggs, NHatched, diffchicks, Comments)) %>%
+  filter(!is.na(NestYear)) %>%
+  bind_rows(xx) %>%
+  mutate(Comments = str_squish(str_remove(Comments, "NA")), 
+        Chicks_2 = ifelse(Status != "Chicks", NA, NHatched)) %>% # THIS MAY NOT ALWAYS HOLD TRUE
+  arrange(NestYear, `Nest ID`)
+
+failed_all <- rbind(failed_eggs, failed_chick, uplifted_chick) %>%
+  select(names(combo_nests))
+
+combo_nests <- combo_nests %>%
+  filter(!FullID %in% failed_all$FullID) %>%
+  bind_rows(failed_all)
+
+```
 
 # TOTALS
 # MAJOR ISSUES HERE! WRONG NUMBERS BECAUSE OF YEARS! PERHAPS NEED TO INDEX
-fn_year <- failed_nests %>% group_by(NestYear) %>% summarise(Nests_failed = n())
-fn_uplifted <- combo_nests[combo_nests$Status == "Uplifted",] %>% group_by(NestYear) %>% summarise(Nests_uplifted = n())
-fn_year <- left_join(fn_year, fn_uplifted, by = "NestYear")
+```{r totals}
+ccc <- unique(combo_nests$NestYear)
 
-totals <- combo_nests %>% 
-  ungroup() %>%
-  group_by(NestYear) %>%
-  summarise(Total_nests = length(unique(`Nest ID`)), 
-           # Nests_failed = fn_year$Nests_failed,
-           # Nests_uplifted = nrow(combo_nests[combo_nests$Status == "Uplifted",]),
-           # Nest_successrate = (Total_nests-Nests_failed)/Total_nests, 
-            Eggs_laid = sum(NLaid, na.rm = T),
-            Chicks_hatched = sum(NHatched, na.rm = T), 
-            Chicks_fledged = sum(Chicks_2, na.rm = T), 
-            Chicks_perpair = Chicks_fledged/Total_nests, 
-            Chicks_peradult = Chicks_fledged/(Total_nests*2)) %>%
-  left_join(fn_year, by = "NestYear")
+tots <- lapply(ccc, function(cc) {
+  
+  fn <- failed_all[failed_all$NestYear == cc,]
+  cn <- combo_nests[combo_nests$NestYear == cc,]
+  
+  # Chicks per pair not being calculated correctly. 
+  totals <- cn %>% 
+    ungroup() %>%
+    summarise(Total_nests = nrow(cn), 
+              Nests_failed = nrow(fn),
+              Nests_uplifted = nrow(cn[cn$Status == "Uplifted" | cn$Status == "Uplifted-failed",]),
+              Nest_successrate = (Total_nests-Nests_failed)/Total_nests, 
+              Eggs_laid = sum(NLaid, na.rm = T),
+              Chicks_hatched = sum(NHatched, na.rm = T), 
+              Chicks_fledged = sum(NHatched, na.rm = T), 
+              Chicks_perpair = Chicks_fledged/Total_nests, 
+              Chicks_peradult = Chicks_fledged/(Total_nests*2)) 
+})
 
 ```
 
 ### Adding parent and chick marking data to dataframes
 ```{r parentid}
+
+#############################################
+##### START HERE. COMPARE PAIRS ACROSS YEARS
+############################################
 birdid_all <- birdid %>%
   filter(`Nest ID_marking` %in% chicks$`Nest ID`) %>% 
   dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`, DateTime_marking)) %>% 
-   mutate(NestYear = ifelse(month(DateTime_marking) > 7, year(DateTime_marking), year(DateTime_marking)-1)) %>% 
+  mutate(NestYear = ifelse(month(DateTime_marking) > 7, year(DateTime_marking), year(DateTime_marking)-1)) %>% 
   dplyr::select(-DateTime_marking) %>% 
   group_by(NestYear, `Nest ID_marking`, Age_marking) %>% 
   mutate(n = row_number()) %>% 
@@ -284,7 +328,7 @@ birdid_all <- birdid %>%
 
 birdid_chicks <- birdid_all %>% 
   filter(#Year == yr, 
-         nn %in% c("Chick1", "Chick2"))
+    nn %in% c("Chick1", "Chick2"))
 
 cols <- rep(NA_real_, length(unique(birdid_all$nn)))
 names(cols) <- rbind(sort(unique(birdid_all$nn)))
@@ -297,7 +341,7 @@ nvisits <- nests %>%
 parents <- nests %>%
   dplyr::select(NestYear, `Nest ID`, `Adult 1`, `Adult 2`) %>%
   group_by(NestYear, `Nest ID`) %>%
-pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
+  pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
   filter(!is.na(ID)) %>%
   mutate(Ind = "Adult") %>%
   distinct() 
