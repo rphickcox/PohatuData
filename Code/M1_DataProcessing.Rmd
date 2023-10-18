@@ -22,7 +22,7 @@ options(scipen = 999)
 ```{r googledrive}
 drive_auth(email = "pohatumonitoring@gmail.com")
 
-drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
+drive_download(file = "https://docs.google.com/spreadsheets/d/1mEcD3r8sAauUH_rE5dDMkvpPlYNVqrEXawA0CYAg34E", 
                overwrite = TRUE, 
                path = "./../ALL_DATA/Data/Monitoring.xlsx")
 monitor <- read_excel("./../ALL_DATA/Data/Monitoring.xlsx")
@@ -341,12 +341,35 @@ nvisits <- nests %>%
 parents <- nests %>%
   dplyr::select(NestYear, `Nest ID`, `Adult 1`, `Adult 2`) %>%
   group_by(NestYear, `Nest ID`) %>%
-  pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
+  pivot_longer(cols = 4:5, names_to = "Ind", values_to = "ID") %>%
   filter(!is.na(ID)) %>%
   mutate(Ind = "Adult") %>%
-  distinct() 
+  distinct() %>%
+  arrange(FullID, ID) %>%
+  mutate(n_parent = row_number()) %>%
+  select(-c(FullID, Ind)) %>%
+  group_by(`Nest ID`)# %>% 
+  #mutate(n_years = length(unique(NestYear)))
 
-# Trying to identify which are new pairs. no idea how
+#parents <- split(parents, parents$NestYear) 
+#parents <- lapply(parents, pivot_wider, names_from = c(n, NestYear), values_from = ID)
+
+#parents <- parents %>%
+ # pivot_wider(names_from = c(n, NestYear), values_from = ID)
+
+parents_years <- parents %>%
+  group_by(ID) %>%
+  mutate(diffnest = ifelse(n_distinct(`Nest ID`) > 1, "diff", "same")) %>%
+  ungroup() %>%
+  group_by(`Nest ID`) %>%
+mutate(diffpair = ifelse(n_distinct(ID) > 2, "diff", "same")) %>%
+  arrange(`Nest ID`, NestYear) %>%
+  pivot_wider(names_from = c(n_parent, NestYear), values_from = ID)
+
+clipr::write_clip(parents_years)
+
+
+  # Trying to identify which are new pairs. no idea how
 
 nests_outcome <- birdid_all %>%
   pivot_wider(names_from = nn, values_from = `Bird ID`) %>% 
