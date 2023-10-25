@@ -338,24 +338,17 @@ nvisits <- nests %>%
   group_by(NestYear, `Nest ID`) %>% 
   summarise(nvisits = max(row_number()))
 
-parents <- nests %>%
-  dplyr::select(NestYear, `Nest ID`, `Adult 1`, `Adult 2`) %>%
-  group_by(NestYear, `Nest ID`) %>%
-  pivot_longer(cols = 4:5, names_to = "Ind", values_to = "ID") %>%
-  filter(!is.na(ID)) %>%
-  mutate(Ind = "Adult") %>%
-  distinct() %>%
-  arrange(FullID, ID) %>%
-  mutate(n_parent = row_number()) %>%
-  select(-c(FullID, Ind)) %>%
-  group_by(`Nest ID`)# %>% 
-  #mutate(n_years = length(unique(NestYear)))
-
-#parents <- split(parents, parents$NestYear) 
-#parents <- lapply(parents, pivot_wider, names_from = c(n, NestYear), values_from = ID)
-
-#parents <- parents %>%
- # pivot_wider(names_from = c(n, NestYear), values_from = ID)
+  parents <- nests %>%
+    mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1)) %>%
+    dplyr::select(NestYear, `Nest ID`, `Adult 1`, `Adult 2`) %>%
+    group_by(NestYear, `Nest ID`) %>%
+    pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
+    filter(!is.na(ID)) %>%
+    mutate(Ind = "Adult") %>%
+    distinct() %>%
+    left_join(select(birdid, `Bird ID`, Sex), by = c("ID" = "Bird ID")) %>%
+    mutate(Ind = ifelse(Sex == "Female" | Sex == "Unknown", "Adult1", "Adult2")) %>%
+    arrange(NestYear, 'Nest ID')
 
 parents_years <- parents %>%
   group_by(ID) %>%
