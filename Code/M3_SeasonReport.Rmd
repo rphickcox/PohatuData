@@ -1,0 +1,98 @@
+---
+title: "Pohatu Penguins Season Report"
+author: "Rachel Hickcox"
+date: "2022"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", 
+          "lubridate", "tidyverse", "openxlsx")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+
+### Reading in cleaned yearly summary of breeding
+#### These Excel sheets were generated from M1_DataProcessing.Rmd 
+#### and cleaned manually in Excel. It contains one row per nest ID for a certain season
+```{r cleanedsum}
+cols <-  c("numeric", rep("text", 5), rep("numeric", 3), rep("text", 6),
+           rep("date", 6), "text", "numeric")
+
+breeding <- lapply(list.files("./../ALL_DATA/Data/", pattern = "finalsummary_edited.xlsm", full.names = TRUE), 
+                   read_excel, col_types = cols)
+names(breeding[[1]]) == names(breeding[[2]])
+```
+
+### Summary tables
+```{r}
+#x <- breeding[[2]]
+
+summary_nests <- function(x){
+  
+  df <- x %>%
+    summarise(
+      NestYear = unique(NestYear),
+      Nests = nrow(x),
+      Nestboxes = length(unique(NestID)),
+      TwoClutch = sum(grepl("\\.", SeasonID)),
+      NestsFailed = length(Status[Status == "Failed"]),
+      NestsUplifted = length(Status[Status == "Uplifted"]),
+      NestsFledged = length(Status[Status == "Fledged"]),
+      MarkedAdults = length(c(Adult1ID[Adult1ID != "UM"], Adult2ID[Adult2ID != "UM"])),
+      MarkedChicks = length(c(Chick1ID[!Chick1ID %in% c("NA", "UM")], Chick2ID[!Chick2ID %in% c("NA", "UM")])),
+      Laid = sum(NLaid),
+      Hatched = sum(NHatched),
+      Fledged = sum(NFledged),
+      OneLaid = length(NLaid[NLaid == 1]),
+      TwoLaid = Laid - OneLaid,
+      ZeroHatch = length(NHatched[NHatched == 0]),
+      OneHatch = length(NHatched[NHatched == 1]),
+      TwoHatch = Hatched - ZeroHatch - OneHatch,
+      Fledged_Assisted = length(c(EC1Fate[EC1Fate == "CFledgedAssisted"], EC2Fate[EC2Fate == "CFledgedAssisted"])),
+      Fledged_Natural = length(c(EC1Fate[EC1Fate == "CFledged"], EC2Fate[EC2Fate == "CFledged"])),
+      SF = length(c(EC1Intervention[EC1Intervention %in% c("SFR", "SF", "SFHR", "SFRH")], 
+                    EC2Intervention[EC2Intervention %in% c("SFR", "SF", "SFHR", "SFRH")])),
+      #fates = table(c(EC1Fate, EC2Fate)),
+      Percent_EggsHatched = round(Hatched/Laid*100, 2), # percent eggs laid that hatched
+      Percent_ChicksFledged = round(Fledged/Hatched*100, 2), # percent chicks fledged that hatched
+      Percent_ChicksFledged_natural = round(Fledged_Natural/Hatched*100, 2), # percent chicks fledged that hatched NO REHAB
+      BreedingSuccess = round(Hatched/Nests, 2), # fledged per breeding pair (i.e., nest)
+      FledgingSuccess = round(Fledged/Nests, 2), # fledged per breeding pair (i.e., nest)
+      FledgingSuccess_natural = round((Fledged-Fledged_Assisted)/Nests, 2), # fledged per breeding pair NO REHAB
+      LayDate_min = as.Date(min(Est_LayDate, na.rm = TRUE)),
+      LayDate_mean = as.Date(mean(Est_LayDate, na.rm = TRUE)),
+      LayDate_max = as.Date(max(Est_LayDate, na.rm = TRUE)),
+      HatchDate_min = as.Date(min(HatchDate, na.rm = TRUE)),
+      HatchDate_mean = as.Date(mean(HatchDate, na.rm = TRUE)),
+      HatchDate_max = as.Date(max(HatchDate, na.rm = TRUE)),
+      FledgeDate_min = as.Date(min(FledgeDate, na.rm = TRUE)),
+      FledgeDate_mean = as.Date(mean(FledgeDate, na.rm = TRUE)),
+      FledgeDate_max = as.Date(max(FledgeDate, na.rm = TRUE))
+ )
+  
+  return(df)
+}
+
+ 
+summary_list <- as.data.frame(t(bind_rows(lapply(breeding, summary_nests)))) %>%
+  mutate(Variable = row.names(.), .before = 1) 
+names(summary_list) <- c("Variable", summary_list[1,2:length(summary_list)])
+summary_list <- summary_list[-1,]
+rownames(summary_list) <- NULL
+
+```
+
+# Save
+```{r}
+write.csv(summary_list, "./../ALL_DATA/Data/SeasonsSummaryReport.csv", row.names = FALSE)
+```
+

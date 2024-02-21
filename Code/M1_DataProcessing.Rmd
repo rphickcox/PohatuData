@@ -9,8 +9,9 @@ editor_options:
 
 ### Load packages
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
-pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", 
-          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse", "openxlsx")
+pkgs <- c("knitr", "kableExtra", "broom", 
+          "readxl", "flextable", "terra", "googlesheets4", "googledrive", 
+          "lubridate", "tidyverse", "openxlsx")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -74,21 +75,26 @@ nestid_coord <- nestid %>%
   mutate(Lat = as.numeric(Lat), Long = as.numeric(Long))
 
 nests <- monitor %>%
+  distinct(across(DateTime:`Chick 4 weight`), .keep_all = TRUE) %>%
   mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1),
          FullID = paste0(NestYear, `Nest ID`), 
          Eggs = ifelse(is.na(Eggs), 0, as.numeric(Eggs)), 
-         Chicks = ifelse(is.na(Chicks), 0, as.numeric(Chicks))) %>%  
+         Chicks = ifelse(is.na(Chicks), 0, as.numeric(Chicks))) %>%  #not visible to NA, error ok
   group_by(FullID) %>%
   arrange(`Nest ID`, DateTime) %>%
   mutate(n = row_number()) %>%
   mutate(n1 = ifelse(`Nest activity` == "Eggs/Chicks present", n, NA)) %>%
-  filter(n >= min(n1, na.rm = TRUE)-1 | n == max(n1, na.rm = TRUE)+1) %>%
+  filter(NestYear != 2021) %>%
+  #error for nests never breeding, n1 is inf, error ok
+  filter(n >= min(n1, na.rm = TRUE)-1, n <= max(n1, na.rm = TRUE)+1) %>% 
   mutate(Date_last = lag(DateTime), .before = DateTime) %>% 
-  filter(`Nest activity` == "Eggs/Chicks present" | 
-           `Nest activity` == "FAILED" | 
-           `Nest activity` == "Empty") %>%
+  # filter(`Nest activity` == "Eggs/Chicks present" | 
+  #          `Nest activity` == "FAILED" | 
+  #          `Nest activity` == "Empty") %>%
   mutate(`Nest activity` = ifelse(Interaction == "Uplifted", 
-                                  "Uplifted",`Nest activity`)) %>% 
+                                  "Uplifted",`Nest activity`))
+
+nests <- nests %>%
   mutate(.after = 2,
          DateTime = as.Date(DateTime),
          Week = ifelse(year(DateTime) > yr, week(DateTime)+52, week(DateTime)),
@@ -118,11 +124,12 @@ nests <- monitor %>%
                        `Nest activity` == "Empty", "R", nn),
          #if row fledged but was previously uplifted, changing status to the previous status (i.e., did not fledge before uplift)
          Status = ifelse(Status == "Fledged" & 
-                           lead(`Nest activity`) == "Uplifted", lag(Status), Status),
+                           `Nest activity` %in% "Uplifted", lag(Status), Status),
          nn = unlist(nn), 
          NHatched = ifelse(max(Chicks, na.rm = T) > 2, 2, max(Chicks, na.rm = T)), 
          NLaid = ifelse(NHatched == 2, 2, max(Eggs, na.rm = T))) %>% 
   filter(!is.na(Status), is.na(nn)) %>% 
+  filter(!is.na(Date_last)) %>% 
   dplyr::select(-c(n, n1, n2, nn))
 ```
 
@@ -220,7 +227,7 @@ chicks <- nests %>%
                            Comments), 
          Comments = paste(Comments, collapse = " "),
          Status2 = ifelse(any(Status == "Fledged"), "Fledged", Status),
-         Status2 = ifelse(any(Status == "Failed"), "Failed", Status),
+         Status2 = ifelse(any(Status == "Failed"), "Failed", Status2),
          Status2 = ifelse(any(Status =="Uplifted"), "Uplifted", Status2),
          nn = row_number(), 
          Chicks_1 = ifelse(is.na(Chicks_1) & Chicks_2 == 2, 2, Chicks_1),
@@ -267,16 +274,17 @@ combo_nests <- eggs %>%
   mutate(HatchDate = HatchDatex, 
          Status = ifelse(is.na(Statusx), Status, Statusx)) %>%  
   unite("Comments", c(Comments, Commentsx, Notes, Notesx), sep = " ") %>% 
-         #NLaid = pmax(Eggs_1, Eggs_2, na.rm = T), 
-         #NHatched = pmax(Chicks_1, Chicks_2, na.rm = T)) %>% 
+  #NLaid = pmax(Eggs_1, Eggs_2, na.rm = T), 
+  #NHatched = pmax(Chicks_1, Chicks_2, na.rm = T)) %>% 
   dplyr::select(c(NestYear, `Nest ID`, Status, Est_LayDate, Est_HatchDate, HatchDate, UpliftDate, Est_FledgeDate, FledgeDate, NLaid, diffeggs, NHatched, diffchicks, Comments)) %>%
   filter(!is.na(NestYear)) %>%
   bind_rows(xx) %>%
   mutate(Comments = str_squish(str_remove(Comments, "NA")), 
-        Chicks_2 = ifelse(Status != "Chicks", NA, NHatched)) %>% # THIS MAY NOT ALWAYS HOLD TRUE
+         Chicks_2 = ifelse(Status != "Chicks", NA, NHatched)) %>% # THIS MAY NOT ALWAYS HOLD TRUE
   arrange(NestYear, `Nest ID`)
 
-failed_all <- rbind(failed_eggs, failed_chick, uplifted_chick) %>%
+failed_all <- rbind(failed_eggs, failed_chick, uplifted_chick) %>% 
+  unite("Comments", c(Comments, Notes), sep = " ") %>% 
   select(names(combo_nests))
 
 combo_nests <- combo_nests %>%
@@ -286,7 +294,8 @@ combo_nests <- combo_nests %>%
 ```
 
 # TOTALS
-# MAJOR ISSUES HERE! WRONG NUMBERS BECAUSE OF YEARS! PERHAPS NEED TO INDEX
+# CHICKS FLEDGED MAY BE HIGHER THAN TRUE, CANT FIGURE OUT TO DETERMINE FLEDGING IF ONE 
+# cHICK DIES OVER THE SEASON AND ONLY ONE CHICK DIES. RIGHT NOW, CONSIDERED AS TOTAL HATCHED I.E. 2 NOT 1
 ```{r totals}
 ccc <- unique(combo_nests$NestYear)
 
@@ -294,17 +303,18 @@ tots <- lapply(ccc, function(cc) {
   
   fn <- failed_all[failed_all$NestYear == cc,]
   cn <- combo_nests[combo_nests$NestYear == cc,]
+  fl <- cn[cn$Status == "Fledged",]
   
   # Chicks per pair not being calculated correctly. 
-  totals <- cn %>% 
+  cn %>% 
     ungroup() %>%
     summarise(Total_nests = nrow(cn), 
-              Nests_failed = nrow(fn),
+              Nests_failed = nrow(fn[fn$Status != "Uplifted",]),
               Nests_uplifted = nrow(cn[cn$Status == "Uplifted" | cn$Status == "Uplifted-failed",]),
               Nest_successrate = (Total_nests-Nests_failed)/Total_nests, 
               Eggs_laid = sum(NLaid, na.rm = T),
               Chicks_hatched = sum(NHatched, na.rm = T), 
-              Chicks_fledged = sum(NHatched, na.rm = T), 
+              Chicks_fledged = sum(fl$NHatched, na.rm = T), 
               Chicks_perpair = Chicks_fledged/Total_nests, 
               Chicks_peradult = Chicks_fledged/(Total_nests*2)) 
 })
@@ -318,72 +328,141 @@ tots <- lapply(ccc, function(cc) {
 ##### START HERE. COMPARE PAIRS ACROSS YEARS
 ############################################
 birdid_all <- birdid %>%
-  filter(`Nest ID_marking` %in% chicks$`Nest ID`) %>% 
-  dplyr::select(c(`Bird ID`, `Nest ID_marking`, `Age_marking`, DateTime_marking)) %>% 
-  mutate(NestYear = ifelse(month(DateTime_marking) > 7, year(DateTime_marking), year(DateTime_marking)-1)) %>% 
-  dplyr::select(-DateTime_marking) %>% 
-  group_by(NestYear, `Nest ID_marking`, Age_marking) %>% 
+  mutate(NestYear = ifelse(month(DateTime_marking) > 7, 
+                           year(DateTime_marking), 
+                           year(DateTime_marking)-1),
+         FullID = ifelse(!is.na(`Nest ID_marking`), 
+                         paste0(NestYear, `Nest ID_marking`), NA)) %>% 
+  group_by(FullID) %>%
+  #filter(FullID %in% combo_nests$FullID) %>% 
+  dplyr::select(c(NestYear, FullID, `Bird ID`, `Age_marking`, Sex)) %>% 
+  group_by(FullID, Age_marking) %>% 
+  arrange(FullID, Age_marking, Sex) %>%
   mutate(n = row_number()) %>% 
-  unite(nn, Age_marking, n, sep = "") 
+  #  unite(nn, Age_marking, n, sep = "", remove = FALSE)  %>%
+  ungroup() %>%
+  mutate(Age_current = ifelse(Age_marking == "Adult", "Adult", 0), 
+         Age_current = ifelse(Age_current == 0 & Age_marking == "Chick" & NestYear !=yr, 
+                              yr-NestYear, Age_current), .after = Age_marking)
 
 birdid_chicks <- birdid_all %>% 
   filter(#Year == yr, 
-    nn %in% c("Chick1", "Chick2"))
+    Age_marking %in% "Chick")
 
-cols <- rep(NA_real_, length(unique(birdid_all$nn)))
-names(cols) <- rbind(sort(unique(birdid_all$nn)))
+birdid_adults <- birdid_all %>% 
+  filter(Age_marking %in% "Adult")
 
-# number of visits
+birdid_all_f <- birdid_all %>%
+  #filter(!is.na(FullID)) %>%# remove birds (chicks) with no nest ID
+  filter(FullID != "2022DUMMY" | is.na(FullID))
+
+# Number of visits
 nvisits <- nests %>% 
-  group_by(NestYear, `Nest ID`) %>% 
+  group_by(FullID) %>% 
   summarise(nvisits = max(row_number()))
 
-  parents <- nests %>%
-    mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1)) %>%
-    dplyr::select(NestYear, `Nest ID`, `Adult 1`, `Adult 2`) %>%
-    group_by(NestYear, `Nest ID`) %>%
-    pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
-    filter(!is.na(ID)) %>%
-    mutate(Ind = "Adult") %>%
-    distinct() %>%
-    left_join(select(birdid, `Bird ID`, Sex), by = c("ID" = "Bird ID")) %>%
-    mutate(Ind = ifelse(Sex == "Female" | Sex == "Unknown", "Adult1", "Adult2")) %>%
-    arrange(NestYear, 'Nest ID')
+# Parents
+parents <- nests %>%
+  mutate(NestYear = ifelse(month(DateTime) > 7, 
+                           year(DateTime), 
+                           year(DateTime)-1),
+         FullID = ifelse(!is.na(`Nest ID`), 
+                         paste0(NestYear, `Nest ID`), NA)) %>% 
+  group_by(FullID) %>%
+  dplyr::select(NestYear, FullID, `Adult 1`, `Adult 2`, DateTime) %>%
+  pivot_longer(cols = 3:4, names_to = "Ind", values_to = "ID") %>%
+  filter(!is.na(ID)) %>%
+  group_by(FullID, ID) %>%
+  mutate(lastdate = max(DateTime), 
+         nseen = n(), 
+         Ind = str_replace_all(Ind, "\\s\\d", "")) %>%
+  dplyr::select(-DateTime) %>%
+  distinct() 
 
-parents_years <- parents %>%
+parents_compare <- parents %>%
+  left_join(birdid_all_f, by = c("ID" = "Bird ID"), suffix = c("", "_marking")) %>%
+  #mutate(Ind = ifelse(Sex == "Female" | Sex == "Unknown", "Adult1", "Adult2")) %>%
+  #mutate(nn_marking = str_replace_all(nn, "\\d", "")) %>%
+  dplyr::select(-c(FullID_marking, Ind)) %>%
+  arrange(FullID)
+
+juves <- filter(parents_compare, Age_current == 1)
+
+# Trying to identify which are new pairs. no idea how
+parents_years <- parents_compare %>%
+  filter(Age_current != 1) %>% # no juves
   group_by(ID) %>%
-  mutate(diffnest = ifelse(n_distinct(`Nest ID`) > 1, "diff", "same")) %>%
+  arrange(ID) %>%
+  mutate(NestID = str_replace_all(FullID, "^\\d{4}", ""),
+         diffnest = ifelse(n_distinct(NestID) > 1, "diff", "same"), 
+         diffnest = ifelse(row_number() == 1, "first_year", diffnest)) %>%
   ungroup() %>%
-  group_by(`Nest ID`) %>%
-mutate(diffpair = ifelse(n_distinct(ID) > 2, "diff", "same")) %>%
-  arrange(`Nest ID`, NestYear) %>%
-  pivot_wider(names_from = c(n_parent, NestYear), values_from = ID)
+  group_by(NestID) %>%
+  mutate(diffpair = ifelse(n_distinct(ID) > 2, "diff", "same"),# THIS ISNT RIGHT, FIX!
+         diffpair = ifelse(diffnest == "first_year", "first_year", diffpair)) %>%
+  arrange(FullID) %>%
+  select(-c(NestYear, NestID))
 
 clipr::write_clip(parents_years)
 
+```
 
-  # Trying to identify which are new pairs. no idea how
+```{r}
+combo_nests_current <- combo_nests %>%
+  filter(NestYear == yr)
 
-nests_outcome <- birdid_all %>%
-  pivot_wider(names_from = nn, values_from = `Bird ID`) %>% 
-  tibble::add_column(!!!cols[!names(cols) %in% names(.)]) %>%
-  right_join(combo_nests, by = c("NestYear", "Nest ID_marking" = "Nest ID")) %>% 
-  rename("Nest ID" = "Nest ID_marking", "NFledged" = "Chicks_2") %>% 
-  left_join(nvisits, by = c("NestYear", "Nest ID")) %>% 
-  arrange(NestYear, `Nest ID`) %>% 
+# Current parents
+nests_outcome <- parents %>%
+  left_join(birdid_all_f, by = c('ID' = "Bird ID"), suffix = c("", "x"))
+
+# Current chicks
+current_chicks <- birdid_chicks %>%
+  filter(NestYear == yr, 
+         !is.na(FullID)) %>%
+  group_by(FullID) %>% 
+  mutate(n = row_number(), 
+         nn = paste0("Chick", n)) %>%
+  select(c("FullID", "Bird ID", "nn")) %>%
+  pivot_wider(names_from = nn, values_from = "Bird ID")
+
+# Resights this year
+resights_current <- filter(nests_outcome, Age_current == 1)
+
+# Combining parents + chicks + nest info
+nests_outcome <- nests_outcome %>%
+  filter(Age_current != 1) %>% 
+  group_by(FullID) %>%
+  arrange(FullID, Sex) %>%
+  mutate(n = row_number(), 
+         n = ifelse(n == 2 & Sex == "Female", max(n), n), 
+         n = ifelse(Sex == "Male", 2, n), 
+         n = ifelse(duplicated(n) | duplicated(n, fromLast = TRUE) &
+                      row_number() > 2, n + 1, n)) %>%
+  unite(nn, Ind, n, sep = "", remove = FALSE) %>% 
+  select(-c(NestYear, NestYearx, FullIDx, Age_marking, 
+            Age_current, Sex, n, lastdate, nseen, Ind)) %>%
+  pivot_wider(names_from = nn, values_from = ID) %>% 
+  right_join(combo_nests_current, by = "FullID") %>%
+  left_join(current_chicks, by = "FullID") %>%
+  left_join(nvisits, by = c("FullID")) %>% 
+  arrange(FullID) %>% 
   ungroup() %>% 
-  mutate_if(is.numeric, as.character) %>%
+  rename("NFledged" = "Chicks_2", 
+         'NestID' = `Nest ID`,
+         "Nvisits" = "nvisits", 
+         "SeasonID" = "FullID") %>% 
+  rename_with(~str_c(., "ID"), starts_with("Chick")) %>% 
+  rename_with(~str_c(., "ID"), starts_with("Adult")) %>% 
   mutate_if(is.Date, format, format = "%d/%m/%Y") %>% 
-  mutate_all(as.character)  %>% 
-  mutate(SeasonID = paste0(NestYear, `Nest ID`), .before = 1) %>% 
+  mutate_all(as.character) %>% 
   mutate(EC1Fate = NA, EC2Fate = NA, EC1Intervention = NA, EC2Intervention = NA, .before = Comments) %>% 
-  relocate(c(Chick1, Chick2, Est_LayDate:FledgeDate), .before = Comments) %>% 
-  relocate(NHatched, .before = NFledged) %>% 
-  dplyr::select(-Unknown1) %>% 
-  rename('NestID' = `Nest ID`, "Adult1ID" = "Adult1", "Adult2ID" = "Adult2", 
-         "Chick1ID" = "Chick1", "Chick2ID" = "Chick2", "Nvisits" = "nvisits") %>% 
-  mutate(across(ends_with(c("1ID", "2ID")), str_replace_na, "UM"))
-
+  mutate(across(ends_with(c("1ID", "2ID")), replace_na, "UM")) %>%
+  mutate(NFledged = ifelse(Chick1ID != "UM" & Chick2ID != "UM", 2, NFledged), 
+         NFledged = ifelse(Status == "Fledged" & is.na(NFledged), NHatched, NFledged)) %>%
+  mutate(EC1Fate = ifelse(Status == "Fledged" & NFledged <= 2, "Fledged", EC1Fate), 
+         EC2Fate = ifelse(Status == "Fledged" & NFledged == 2, "Fledged", EC2Fate), 
+         Comments = str_squish(Comments)) %>%
+  select(NestYear, SeasonID, NestID, starts_with("Adult"), Status, NLaid:diffchicks, NFledged, EC1Fate:EC2Intervention, Chick1ID:Chick3ID, Est_LayDate:FledgeDate, Comments, Nvisits)
 ```
 
 ```{r}
@@ -396,24 +475,48 @@ openxlsx::write.xlsx(nests_outcome, paste0("./../ALL_DATA/Data/BreedingSeason_",
 ### Getting information about the moult
 ```{r moult}
 moult <- monitor %>%
-  filter(`Nest activity` == "Moulting")
+  filter(`Nest activity` == "Moulting") %>%
+  mutate(.before = 1, NestYear = ifelse(month(DateTime) > 7, 
+                                        year(DateTime), 
+                                        year(DateTime)-1),
+         FullID = ifelse(!is.na(`Nest ID`), 
+                         paste0(NestYear, `Nest ID`), NA))
 
 length(unique(moult$`Adult 1`))
 length(unique(moult$`Nest ID`))
 
-markedmoult <- moult %>% 
-  filter(!is.na(`Adult 1`) | !is.na(`Adult 2`) | 
-           !is.na(`Adult 3`) | !is.na(`Adult 4`)) %>% 
-  select(`Nest ID`, `Adult 1`, `Adult 2`) %>% 
-  pivot_longer(c(`Adult 1`, `Adult 2`), names_to = "n", values_to = "AdultID") %>% 
-  filter(!is.na(AdultID)) %>% 
-  select(-n) %>% 
-  distinct()
+ccc <- unique(moult$NestYear)
 
-notmoulted <- birdid %>% 
-  select(`Nest ID_marking`, `Bird ID`, Age_marking) %>% 
-  filter(!`Bird ID` %in% markedmoult$AdultID) %>% 
-  filter(Age_marking != "Chick") 
+markedmoult <- lapply(ccc, function(ccc) {
+  xx <- moult %>%
+    filter(NestYear == ccc) %>% 
+    select(NestYear, FullID, `Nest ID`, `Adult 1`, `Adult 2`, `Adult 3`, `Adult 4`) %>% 
+    pivot_longer(c(`Adult 1`, `Adult 2`, `Adult 3`, `Adult 4`), names_to = "n", values_to = "AdultID") %>% 
+    filter(!is.na(AdultID)) %>% 
+    select(-n) %>% 
+    distinct() %>%
+    left_join(birdid_all, by = c("AdultID" = "Bird ID"), suffix = c("", "x"))
+})
+
+notmoult <- lapply(markedmoult, function(markedmoult) {
+  xx <- unique(markedmoult$NestYear)
+  birdid_all %>% 
+    filter(NestYear <= xx, 
+           !`Bird ID` %in% markedmoult$AdultID) %>% 
+    filter(!Age_current %in% c("0", "1", "Chick"))
+})
+
+notmoult_juv <- lapply(markedmoult, function(markedmoult) {
+  xx <- unique(markedmoult$NestYear)
+  birdid_all %>% 
+    filter(NestYear <= xx, 
+           !`Bird ID` %in% markedmoult$AdultID) %>% 
+    filter(Age_current == "1")
+})
+
+tmoult <- lapply(markedmoult, function(x){nrow(x)})
+tnotmoult <- lapply(notmoult, function(x){nrow(x)})
+
 ```
 
 ### Getting information about resights
@@ -422,17 +525,19 @@ cc <- c("Adult 1", "Adult 2", "Adult 3", "Adult 4",
         "Chick 1 ID", "Chick 2 ID", "Chick 3 ID", "Chick 4 ID")
 
 resight <- monitor %>%
-  select(DateTime, `Nest ID`, all_of(cc) , Image.http) %>% 
+  select(DateTime, `Nest ID`, all_of(cc)) %>% 
   filter(DateTime >= start & DateTime <= end) %>%
   pivot_longer(all_of(cc), names_to = "n", values_to = "BirdID") %>% 
   group_by(BirdID) %>% 
   filter(!is.na(BirdID), DateTime == max(DateTime, na.rm = T)) %>%
-  mutate(n = str_replace_all(n, " ID", ""))
+  mutate(n = str_replace_all(n, " ID", ""),
+         n = str_replace_all(n, "\\s\\d", ""))
 
 
 chick_resights <- resight %>% 
-  filter(DateTime >= non_br & DateTime <= end) %>% 
-  filter(BirdID %in% birdid_chicks$`Bird ID`)
+  #filter(DateTime >= non_br & DateTime <= end) %>% 
+  filter(BirdID %in% birdid_chicks$`Bird ID`) %>%
+  arrange(BirdID)
 ```  
 
 ```{r}

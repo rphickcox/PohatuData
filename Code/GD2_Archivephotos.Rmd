@@ -9,8 +9,8 @@ editor_options:
 
 ### Load packages
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
-pkgs <- c("rgdal", "rgeos", "raster", "knitr", "kableExtra", "broom", "beepr",
-          "readxl", "flextable", "terra", "googlesheets4", "googledrive", "lubridate", "tidyverse")
+pkgs <- c("broom", "beepr", "readxl", "flextable", "googlesheets4", "googledrive",
+          "lubridate", "tidyverse")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -22,7 +22,7 @@ options(scipen = 999)
 ```{r googledrive}
 drive_auth(email = "pohatumonitoring@gmail.com")
 
-drive_download(file = "https://docs.google.com/spreadsheets/d/1AKbYixeUF_LM8SEknA49wvnERDVeZFWEIAilM75m0nw", 
+drive_download(file = "https://docs.google.com/spreadsheets/d/1mEcD3r8sAauUH_rE5dDMkvpPlYNVqrEXawA0CYAg34E",
                overwrite = TRUE, 
                path = "Monitoring.xlsx")
 monitor <- read_excel("Monitoring.xlsx")
@@ -30,7 +30,7 @@ monitor <- read_excel("Monitoring.xlsx")
 
 # SETUP
 ```{r}
-date_before <- as.Date("2023-07-01")
+date_before <- as.Date("2023-11-01")
 
 files_drive1 <- drive_ls(path = "Monitoring.files")
 save_to <- "D:/Monitoring_photos" # THIS MAY CHANGE
@@ -75,7 +75,7 @@ to_download <- monitor %>%
   mutate(pathname = str_split(Image, "/+"), 
          pathname = map_chr(pathname, ~.x[length(.x)]), 
          newpath = paste(`Nest ID`, pathname, sep = " ")) %>%  # get just path name
-  filter(!is.na(Image),!is.na(Image.http), pathname %in% files_drive$name) %>% 
+    filter(!is.na(Image),!is.na(Image.http), pathname %in% files_drive$name) %>% 
   mutate(n = row_number())
 
 files_drive <- filter(files_drive, files_drive$name %in% to_download$pathname)
