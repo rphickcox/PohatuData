@@ -30,6 +30,10 @@ bp <- st_read(here("./../ALL_DATA/Mapping/bankspeninsula_region_marine.shp"))
 nz_marine <- st_read(here("./../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp"))
 bathymetry <- rast(here("./../ALL_DATA/Mapping/bathymetry_formapping.tif"))
 
+
+nz <- st_read(here("./../ALL_DATA/Mapping/NZ_fullcountry_NZTM2000.shp"))
+
+
 # transform to wgs 84 projection
 nz_wgs <- st_transform(nz, crs = 4326)
 bp_wgs <- st_transform(bp, crs = 4326)

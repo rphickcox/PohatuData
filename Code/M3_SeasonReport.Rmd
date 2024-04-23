@@ -27,7 +27,8 @@ options(scipen = 999)
 cols <-  c("numeric", rep("text", 5), rep("numeric", 3), rep("text", 6),
            rep("date", 6), "text", "numeric")
 
-breeding <- lapply(list.files("./../ALL_DATA/Data/", pattern = "finalsummary_edited.xlsm", full.names = TRUE), 
+breeding <- lapply(list.files("./../ALL_DATA/", pattern = "finalsummary_edited.xlsm", full.names = TRUE,
+                              recursive = TRUE, include.dirs = TRUE), 
                    read_excel, col_types = cols)
 names(breeding[[1]]) == names(breeding[[2]])
 ```

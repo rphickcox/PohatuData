@@ -295,7 +295,7 @@ combo_nests <- combo_nests %>%
 
 # TOTALS
 # CHICKS FLEDGED MAY BE HIGHER THAN TRUE, CANT FIGURE OUT TO DETERMINE FLEDGING IF ONE 
-# cHICK DIES OVER THE SEASON AND ONLY ONE CHICK DIES. RIGHT NOW, CONSIDERED AS TOTAL HATCHED I.E. 2 NOT 1
+# CHICK DIES OVER THE SEASON AND ONLY ONE CHICK DIES. RIGHT NOW, CONSIDERED AS TOTAL HATCHED I.E. 2 NOT 1
 ```{r totals}
 ccc <- unique(combo_nests$NestYear)
 
@@ -462,7 +462,7 @@ nests_outcome <- nests_outcome %>%
   mutate(EC1Fate = ifelse(Status == "Fledged" & NFledged <= 2, "Fledged", EC1Fate), 
          EC2Fate = ifelse(Status == "Fledged" & NFledged == 2, "Fledged", EC2Fate), 
          Comments = str_squish(Comments)) %>%
-  select(NestYear, SeasonID, NestID, starts_with("Adult"), Status, NLaid:diffchicks, NFledged, EC1Fate:EC2Intervention, Chick1ID:Chick3ID, Est_LayDate:FledgeDate, Comments, Nvisits)
+  select(NestYear, SeasonID, NestID, starts_with("Adult"), Status, NLaid:diffchicks, NFledged, EC1Fate:EC2Intervention, Chick1ID:Chick2ID, Est_LayDate:FledgeDate, Comments, Nvisits)
 ```
 
 ```{r}
@@ -521,17 +521,48 @@ tnotmoult <- lapply(notmoult, function(x){nrow(x)})
 
 ### Getting information about resights
 ```{r resight}
+# Resights from birdid
+resight_birdid <- birdid %>% 
+  select(`Bird ID`, Sex, DateTime_resighting, `Nest ID_resighting`, `Age_resighting`:`Bill length_resighting`) %>%
+  filter(!is.na(Status_resighting))
+
 cc <- c("Adult 1", "Adult 2", "Adult 3", "Adult 4", 
         "Chick 1 ID", "Chick 2 ID", "Chick 3 ID", "Chick 4 ID")
 
 resight <- monitor %>%
-  select(DateTime, `Nest ID`, all_of(cc)) %>% 
-  filter(DateTime >= start & DateTime <= end) %>%
+  select(DateTime, `Nest ID`, `Nest activity`, `Number of adults`, all_of(cc), ) %>% 
+  filter(DateTime >= start & DateTime <= end) %>% # THIS SEASON ONLY
   pivot_longer(all_of(cc), names_to = "n", values_to = "BirdID") %>% 
   group_by(BirdID) %>% 
-  filter(!is.na(BirdID), DateTime == max(DateTime, na.rm = T)) %>%
+  filter(!is.na(BirdID)) %>% 
   mutate(n = str_replace_all(n, " ID", ""),
-         n = str_replace_all(n, "\\s\\d", ""))
+         n = str_replace_all(n, "\\s\\d", "")) %>%
+  filter(n != "Chick") %>% 
+  select(-n)
+
+# Resightings during breeding season (breeding)
+resight_breeding <- resight %>% 
+    filter(`Nest activity` %in% c("Eggs/Chicks present", "FAILED")) %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == min(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current), by = c("BirdID" = "Bird ID"))
+
+# Resightings during moult only (non-breeders)
+resight_moult <- resight %>% 
+  filter(`Nest activity` == "Moulting") %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == min(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current), by = c("BirdID" = "Bird ID")) %>% 
+  filter(!BirdID %in% resight_breeding$BirdID)
+
+# Resightings during breeding season (LOAFING but no seen BREEDING OR MOULTING)
+resight_loaf <- resight %>% 
+    filter(!`Nest activity` %in% c("Eggs/Chicks present", "FAILED", "Moulting")) %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == min(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current), by = c("BirdID" = "Bird ID")) %>%
+  filter(!BirdID %in% resight_breeding$BirdID) %>% 
+  filter(!BirdID %in% resight_moult$BirdID)
 
 
 chick_resights <- resight %>% 
@@ -539,13 +570,6 @@ chick_resights <- resight %>%
   filter(BirdID %in% birdid_chicks$`Bird ID`) %>%
   arrange(BirdID)
 ```  
-
-```{r}
-xxx <- monitor %>% 
-  filter(DateTime>=tdt-7, 
-         `Nest activity` != "Empty")
-
-```
 
 ### Reading in cleaned yearly summary of breeding
 ```{r cleanedsum}

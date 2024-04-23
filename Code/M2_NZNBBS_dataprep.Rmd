@@ -8,54 +8,110 @@ editor_options:
 ---
 
 ```{r}
+library(here)
 source(here("Code", "M1_DataProcessing.Rmd"))
+yr <- ifelse(month(today()) > 8, year(today()), year(today())-1) # yr
+start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1) # start date
+end <- as.Date(paste0("01-09-", yr + 1), "%d-%m-%Y")
+non_br <- as.Date(paste0("01-04-", yr + 1), "%d-%m-%Y")
+```
+
+### Reading in cleaned yearly summary of breeding
+```{r breedingsum}
+breeding <- read_excel("./../ALL_DATA/Data/BreedingSeason_2023_finalsummary_edited.xlsm")
+breeding <- breeding %>% 
+  select(NestID:Status, NFledged) %>%
+  pivot_longer(cols = c("Adult1ID", "Adult2ID"), names_to = "X", values_to = "BirdID" ) %>% 
+  filter(BirdID != "UM") %>% 
+  select(-c(Status, X))
 ```
 
 
 ### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
 ```{r birdid}
-x <- data.frame(matrix(ncol = 50, nrow = nrow(birdid)))
-x[is.na(x)] <- ""
+colnam <- c("Prefix",	"Number",	"Date", "Date Accuracy",	"Banding_scheme",	"L3_number",	"L3_name",
+            "Bander_number", "Bander_name",	"Other_name",	"Other_contact",	"NZNBBS_code",	"Lookup_Code",	
+            "Stock_code",	"Event_code",	"Capture_code", "Wild Captive",	"Common_name",	
+            "Scientific_name",	"Species_code",	"Age",	"Sex",	"Region_Code",
+            "Locality_general",	"Locality_description",	"Latitude",	"Longitude",	
+            "Easting",	"Northing",	"Coordinate system",	"Locality_accuracy",	
+            "Colour_band_material_1",	"Colour_band_type_1",	"Colour_band_fixing_type_1",
+            "Mark_uncertainty_1",	"Left_tibia_1",	"Left_tarsus_1",	"Right_tibia_1",
+            "Right_tarsus_1",	"Non_leg_mark_type_1",	"Non_leg_mark_id_1",	"Colour_band_material_2",
+            "Colour_band_type_2",	"Colour_band_fixing_type_2", "Mark_uncertainty_2",
+            "Left_tibia_2",	"Left_tarsus_2",	"Right_tibia_2",	"Right_tarsus_2",	
+            "Non_leg_mark_type_2",	"Non_leg_mark_id_2",	"Status_code_1",	"Condition_1",
+            "Status_code_2",	"Condition_2",	"Status_detail1",	"Status_detail2",	"Notes",	
+            "Sent_date",	"Moratorium",	"Detail1",	"Units1",	"Data1",	"Detail2",	"Units2",	
+            "Data2",	"Detail3",	"Units3",	"Data3",	"Detail4",	"Units4",	"Data4",	"Detail5",	
+            "Units5",	"Data5",	"Detail6",	"Units6",	"Data6",	"Detail7",	"Units7",	"Data7",
+            "Detail8",	"Units8",	"Data8",	"Detail9",	"Units9",	"Data9",	"Detail10",	
+            "Units10",	"Data10",	"OtherDetail1",	"OtherDetailUnit1",	"OtherDetailData1",
+            "Project_Name",	"Species_Group")
 
-monitor <- mutate(monitor, DT = format(DateTime, "%d/%m/%Y"))
-df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell", "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine", "Joey", "Ben", "Thomas Stracke"), 
-y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell", "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine Guillemont-Peacock", "Josephine Cataliotti", "Benoit Navarron", "Thomas Stracke"), n = c(0722, 0786, 1121, 0791, 1017, 1150,1191, 1153, 1157, 1158, 1120, 1119, 1118, 0724))
+x <- data.frame(matrix(ncol = 95, nrow = nrow(birdid)))
+x[is.na(x)] <- ""
+names(x) <- colnam
+
+monitor <- mutate(monitor, DT = format(DateTime, "%d/%m/%Y 00:00"))
+df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell",
+                       "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine", 
+                       "Joey", "Ben", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
+                 y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", 
+                       "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell", "Georgia Gwatkin", 
+                       "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", 
+                       "Geraldine Guillemont-Peacock", "Josephine Cataliotti", 
+                       "Benoit Navarron", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
+                 n = c("0722", "0786", "1121", "0791", "1017", "1150","1191", "1153", "1157", "1158", "1120", "1119", "1118", "0724", "1354", "0870"))
+
+xx <- monitor[c(39, 3, 16, 17)] %>% distinct()
 
 marking <- birdid %>% 
   dplyr::select(`Bird ID`, Sex:Site_marking, Status_marking, Tagger, `Nest ID_marking`:`Bill depth_marking`) %>% 
-  mutate(.before = 1, DT = format(DateTime_marking, "%d/%m/%Y")) %>% 
-  left_join(monitor[c(37, 3, 16, 17)], by = c("DT" = "DT", "Nest ID_marking" = "Nest ID")) %>% 
+  mutate(.before = 1, DT = format(DateTime_marking, "%d/%m/%Y 00:00")) %>% 
+  left_join(xx, by = c("DT" = "DT", "Nest ID_marking" = "Nest ID")) %>% 
   distinct() %>% 
-  mutate(DateTime_marking = format(DateTime_marking, "%d/%m/%Y %H:%M"), 
-         Site_marking = ifelse(Status_marking != "In  rehabilitation", "Wild", "Captivity"), 
-         Condition = ifelse(Status_marking == "Wild", "0. Good", "3. Rehabilitated")) %>% 
-  mutate(Prefix_number = "PIT", Number = `Bird ID`, Date = DateTime_marking, 
-         Date_Accuracy = "D", Banding_scheme = "NZNBBS Non-gamebird",
+  mutate(yr = ifelse(month(DateTime_marking) > 8, year(DateTime_marking), year(DateTime_marking)-1),
+         Site_marking = ifelse(Site_marking == "Flea Bay" & Status_marking == "In rehabilitation", 
+                               "Release site", "Wild"), 
+         Site_marking = ifelse(Site_marking == "Wild" & Status_marking == "In rehabilitation", 
+                               "Captivity", Site_marking),
+         Condition = ifelse(Site_marking == "Wild", "0. Good", "3. Rehabilitated")) %>% 
+  mutate(Prefix_number = "PIT", 
+         Number = `Bird ID`, 
+         Date = format(DateTime_marking, "%d/%m/%Y 00:00"), Date_Accuracy = "D", 
+         Banding_scheme = "NZNBBS Non-gamebird",
          L3_number = "0722", L3_Name = "Rachel Hickcox", 
          Bander_number = "",	Bander_name = Tagger, Other_name = "", Other_contact = "",
          NZNBBS_code = 1,
-         Lookup_Code = "First marking",Stock_code = "",	Event_code = "first-mark-in-hand",
-         Capture_code	= "1b. Captured in nest box", Wild_Captive = Status_marking,
-         Common_name	= "white-flippered blue penguin, kororā",	
-         Scientific_name = "Eudyptula minor albosignata",	Species_code = "016", 
+         Lookup_Code = "First marking",
+         Stock_code = "",	
+         Event_code = "first-mark-in-hand",
+         Capture_code	= ifelse(Site_marking == "Wild", "1b. Captured in nest box", "1. Caught by hand"), 
+         Wild_Captive = Site_marking,
+         Common_name	= ifelse(Morph %in% c("B6", "B7"), 
+                              "Little penguin, kororā", "white-flippered blue penguin, kororā"),	
+         Scientific_name = ifelse(Morph %in% c("B6", "B7"), "Eudyptula minor", "Eudyptula minor albosignata"),	
+         Species_code = ifelse(Morph %in% c("B6", "B7"), "994", "016"), 
          Age = Age_marking, Sex_ = Sex, Region_Code =  "11. Canterbury",
          Locality_general = "1 Pōhatu/Flea Bay, Banks Peninsula",
          Locality_description = "Pōhatu/Flea Bay, Banks Peninsula", Latitude =	-43.86838,	
          Longitude = 173.00887, Easting =	1600714, Northing =	5142745, Coordinate_system =	"WGS84", 
          Locality_accuracy = 100) %>% 
-  bind_cols(x[1:18]) %>% 
+  bind_cols(x[32:49]) %>% 
   mutate(Non_leg_mark_type_2	= "insertion transponder"	, Non_leg_mark_id_2 = "*",
          Status_code_1	= "alive", Condition_1 = Condition) %>% 
-  bind_cols(x[1:2]) %>% 
+  bind_cols(x[54:55]) %>% 
   mutate(status_detail1 = Status_marking, Status_detail2 = "",
-         Notes = "Permit 94750-FAU", Sent_date = format(today(), "%d/%m/%Y %H:%M"), Moratorium	= "", 
+         Notes = "Permit 94750-FAU", Sent_date = format(today(), "%d/%m/%Y 00:00"), Moratorium	= "", 
          Detail1 = "mass (excluding bag/transmitter etc.)", Units1 = "grams (g)", Data1 = Weight_marking,
          Detail2 = "bill length",	Units2 = "millimetres (mm)",	Data2 =  `Bill length_marking`, 
          Detail3 = "bill depth",	Units3 = "millimetres (mm)",	Data3 =  `Bill depth_marking`, 
          Detail4	= "nest number", Units4	= "nest number", Data4 = `Nest ID_marking`) %>% 
-  bind_cols(x[1:21]) %>% 
+  bind_cols(x[73:93]) %>% 
   mutate(Project_Name	= "Pōhatu Little Penguins", Species_Group	= "Penguins") %>% 
-  dplyr::select(-c(DT:`Bill length_marking`, 'Bill depth_marking'))
+  filter(yr == 2023 ) %>% 
+  dplyr::select(-c(DT:`Bill length_marking`, 'Bill depth_marking', yr))
 
 marking_fix <- marking %>% 
   mutate(Eggs = ifelse(is.na(Eggs), 0, Eggs), 
@@ -71,17 +127,171 @@ marking_fix <- marking %>%
   mutate(Age = recode(Age, "Adult" = "A", "Chick" = "C", "Juvenile" = "J", "Unknown" ="U"), 
          Age = ifelse(is.na(Age), "U", Age), 
          Sex_ = recode(Sex_, "Female" = "FU", "Male" = "U", "Unknown" = "U"),
-         Sex_ = ifelse(is.na(Sex_), "U", Sex_)) %>% 
+         Sex_ = ifelse(is.na(Sex_), "U", Sex_), 
+         status_detail1 = ifelse(Age == "C", "40. Chick in nest", status_detail1),
+         Non_leg_mark_id_2 = paste(Prefix_number, Number, sep = "-")) %>% 
   group_by(Data4) %>% 
   mutate(Sex_ = ifelse(Sex_ == "U" & "FU" %in% Sex_, "MU", Sex_)) %>% 
   left_join(df, by = c("Bander_name" = "x"), keep = FALSE) %>% 
   mutate(Bander_name = y, Bander_number = n) %>% 
-  dplyr::select(-c(Eggs, Chicks, Condition, y, n))
+  dplyr::select(-c(Eggs, Chicks, Condition, y, n)) %>%
+  mutate(across(everything(), as.character))
+
+names(marking_fix) <- colnam
 
 marking_fix %>% 
   group_by(Age) %>% 
   summarise(Age = unique(Age), 
             Count = n())
 
-write.xlsx(marking_fix, "Pohatu_LPDB/NZNBBS_PohatuPenguins_2022_2023_R.xlsx", rowNames = FALSE)
+write.xlsx(marking_fix, "../ALL_DATA/Data/NZNBBS_PohatuPenguins_2023_2024_R.xlsx", rowNames = FALSE)
+```
+
+### RESIGHTINGS Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
+```{r resightprep}
+# Bird ID
+birdid_all <- birdid %>%
+  mutate(NestYear = ifelse(month(DateTime_marking) > 7, 
+                           year(DateTime_marking), 
+                           year(DateTime_marking)-1),
+         FullID = ifelse(!is.na(`Nest ID_marking`), 
+                         paste0(NestYear, `Nest ID_marking`), NA)) %>% 
+  group_by(FullID) %>%
+  dplyr::select(c(NestYear, FullID, `Bird ID`, `Age_marking`, Sex, Morph)) %>% 
+  group_by(FullID, Age_marking) %>% 
+  arrange(FullID, Age_marking, Sex) %>%
+  mutate(n = row_number()) %>% 
+  ungroup() %>%
+  mutate(Age_current = ifelse(Age_marking == "Adult", "Adult", 0), 
+         Age_current = ifelse(Age_current == 0 & Age_marking == "Chick" & NestYear !=yr, 
+                              yr-NestYear, Age_current), .after = Age_marking)
+
+# Resights from birdid
+resight_birdid <- birdid %>% 
+  select(`Bird ID`, Sex, Morph, DateTime_resighting, `Nest ID_resighting`, `Age_resighting`:`Bill length_resighting`) %>%
+  mutate(NestYear = ifelse(month(DateTime_resighting) > 7, 
+                           year(DateTime_resighting), 
+                           year(DateTime_resighting)-1)) %>% 
+  filter(NestYear == yr, !is.na(Status_resighting), Age_resighting %in% c("Adult", "Juvenile") ) %>% 
+  filter(Status_resighting == "Dead" | !is.na(Weight_resighting))
+
+# Resights from monitoring data
+cc <- c("Adult 1", "Adult 2", "Adult 3", "Adult 4", 
+        "Chick 1 ID", "Chick 2 ID", "Chick 3 ID", "Chick 4 ID")
+resight <- monitor %>%
+  select(DateTime, `Nest ID`, `Nest activity`, `Number of adults`, all_of(cc), ) %>% 
+  filter(DateTime >= start & DateTime <= end) %>% # THIS SEASON ONLY
+  pivot_longer(all_of(cc), names_to = "n", values_to = "BirdID") %>% 
+  group_by(BirdID) %>% 
+  filter(!is.na(BirdID)) %>% 
+  mutate(n = str_replace_all(n, " ID", ""),
+         n = str_replace_all(n, "\\s\\d", "")) %>%
+  filter(n != "Chick") %>% 
+  select(-n) %>%
+  left_join(distinct(breeding[2:3]), by = "BirdID") %>%
+  mutate(`Nest activity` = ifelse(is.na(NFledged) & `Nest activity` == "Eggs/Chicks present", "Loafing adult(s)", `Nest activity`))
+
+# Resightings during breeding season (breeding)
+resight_breeding <- resight %>% 
+  filter(`Nest activity` %in% c("Eggs/Chicks present", "FAILED")) %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == max(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current, Morph), by = c("BirdID" = "Bird ID"))
+
+resight_breeding$Age_current[resight_breeding$BirdID == "P41704"] <- "Adult"
+
+# Resightings during moult only (non-breeders)
+resight_moult <- resight %>% 
+  filter(`Nest activity` == "Moulting") %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == min(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current, Morph), by = c("BirdID" = "Bird ID")) %>% 
+  filter(!BirdID %in% resight_breeding$BirdID)
+
+# Resightings during breeding season (LOAFING but no seen BREEDING OR MOULTING)
+resight_loaf <- resight %>% 
+  filter(!`Nest activity` %in% c("Eggs/Chicks present", "FAILED", "Moulting")) %>% 
+  group_by(BirdID) %>% 
+  filter(DateTime == min(DateTime, na.rm = T)) %>%
+  left_join(select(birdid_all, `Bird ID`, Sex, Age_current, Morph), by = c("BirdID" = "Bird ID")) %>%
+  filter(!BirdID %in% resight_breeding$BirdID) %>% 
+  filter(!BirdID %in% resight_moult$BirdID)
+```
+
+
+# Resightings combined
+```{r resightcombo}
+# Breeding adults, adults seen only during the moult (non-breeders), and adults seen loafing (non-breeders and not seen moulting)
+resight_all <- resight_breeding %>% 
+  ungroup() %>% 
+  bind_rows(resight_moult, resight_loaf)
+
+x <- data.frame(matrix(ncol = 95, nrow = nrow(resight_all)))
+x[is.na(x)] <- ""
+names(x) <- colnam
+
+resight_all <- resight_all %>% 
+  mutate(Prefix_number = "PIT", 
+         Number = BirdID, 
+         Date = format(DateTime, "%d/%m/%Y 00:00"), Date_Accuracy = "D", 
+         Banding_scheme = "NZNBBS Non-gamebird",
+         L3_number = "0722", L3_Name = "Rachel Hickcox", 
+         Bander_number = "",	Bander_name = "", Other_name = "", Other_contact = "",
+         NZNBBS_code = 1,
+         Lookup_Code = "Resighted without being caught",
+         Stock_code = "",	
+         Event_code = "sighted-by-person",
+         Capture_code	= "", 
+         Wild_Captive = "Wild",
+         Common_name	= ifelse(Morph %in% c("B6", "B7"), 
+                              "Little penguin, kororā", "white-flippered blue penguin, kororā"),	
+         Scientific_name = ifelse(Morph %in% c("B6", "B7"), "Eudyptula minor", "Eudyptula minor albosignata"),	
+         Species_code = ifelse(Morph %in% c("B6", "B7"), "994", "016"), 
+         Age = Age_current,
+         Region_Code =  "11. Canterbury",
+         Locality_general = "1 Pōhatu/Flea Bay, Banks Peninsula",
+         Locality_description = "Pōhatu/Flea Bay, Banks Peninsula", Latitude =	-43.86838,	
+         Longitude = 173.00887, Easting =	1600714, Northing =	5142745, Coordinate_system =	"WGS84", 
+         Locality_accuracy = 100) %>% 
+  relocate(Sex, .after = Age) %>% 
+  bind_cols(x[32:39]) %>% 
+  mutate(Non_leg_mark_type_1	= "insertion transponder"	, Non_leg_mark_id_1 = "*") %>% 
+  bind_cols(x[42:51]) %>% 
+  mutate(Status_code_1	= "alive", Condition_1 = "0. Good") %>% 
+  bind_cols(x[54:55]) %>% 
+  mutate(status_detail1 = ifelse(NFledged == 2, "58. With more than one chick", "49. At breeding colony"),
+         status_detail1 = ifelse(NFledged == 1, "57. With chick", status_detail1),
+         status_detail1 = ifelse(NFledged == 0, "50. Breeding", status_detail1),
+         status_detail1 = ifelse(`Nest activity` == "Loafing adult(s)" & Age == "Adult", 
+                                 "51. Not breeding", status_detail1), 
+         status_detail1 = ifelse(`Nest activity` == "Loafing adult(s)" & Age != "Adult", 
+                                 "49. At breeding colony", status_detail1), 
+         status_detail1 = ifelse(`Nest activity` == "FAILED", 
+                                 "50. Breeding", status_detail1), 
+         status_detail1 = ifelse(`Nest activity` == "Moulting", 
+                                 "99. Other: add in notes", status_detail1), 
+         status_detail2 = "", 
+         Notes = ifelse(`Nest activity` == "Moulting", "Moulting; Permit 94750-FAU", "Permit 94750-FAU"),
+         Sent_date = format(today(), "%d/%m/%Y 00:00"), Moratorium	= "", 
+         Detail1	= "nest number", Units1	= "nest number", Data1 = `Nest ID`) %>%  
+  bind_cols(x[64:93]) %>% 
+  mutate(Project_Name	= "Pōhatu Little Penguins", Species_Group	= "Penguins") %>% 
+  mutate(Age = recode(Age, "Adult" = "A", "1" = "J", "2" = "A", "Unknown" ="U"), 
+         Age = ifelse(is.na(Age), "U", Age), 
+         Sex = recode(Sex, "Female" = "FU", "Male" = "MU", "Unknown" = "U"),
+         Sex = ifelse(is.na(Sex), "U", Sex)) %>% 
+  filter(Age != 0) %>% 
+  dplyr::select(-c(DateTime:Morph)) %>%
+  mutate(across(everything(), as.character))
+names(resight_all) <- colnam
+
+```
+
+
+```{r save}
+# Some resights missing measurements, easier to manually edit that code it. 
+resight_birdid
+
+all <- marking_fix %>% bind_rows(resight_all)
+write.xlsx(all, "../ALL_DATA/Data/NZNBBS_PohatuPenguins_2023_2024_R.xlsx", rowNames = FALSE)
 ```
