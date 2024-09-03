@@ -30,9 +30,14 @@ bp <- st_read(here("./../ALL_DATA/Mapping/bankspeninsula_region_marine.shp"))
 nz_marine <- st_read(here("./../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp"))
 bathymetry <- rast(here("./../ALL_DATA/Mapping/bathymetry_formapping.tif"))
 
+bp <- st_read("C:/Users/rphic/Downloads/extentfiles/BPextent.shp")
+extent_bp <- ext(bp)
 
 nz <- st_read(here("./../ALL_DATA/Mapping/NZ_fullcountry_NZTM2000.shp"))
-
+nz_crop <- st_intersection(nz, bp)
+nz_buffer <- st_buffer(nz_crop, 50000)
+nz_crop <- st_crop(nz_buffer, extent_bp)
+nz_crop <- st_difference(nz_crop, nz)
 
 # transform to wgs 84 projection
 nz_wgs <- st_transform(nz, crs = 4326)
