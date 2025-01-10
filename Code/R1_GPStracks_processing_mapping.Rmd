@@ -35,18 +35,23 @@ bp <- st_read("../ALL_DATA/Mapping/bankspeninsula_region_marine.shp")
 nz_marine <- st_read("../ALL_DATA/Mapping/nz_polygon_nztm2000_water75.shp")
 
 bathymetry <- rast("../ALL_DATA/Mapping/bathymetry_formapping.tif")
+
+nzgd2000 <- 2193
+
+wgs84 <- 4326  # EPSG code 4326 (WGS84)
+
 ```
 
 ### Setup
 ```{r}
 # These change depending on the folder
-nestcoords <- readxl::read_excel("Nest ID.xlsx")
+nestcoords <- read.csv("C:/Users/rphic/OneDrive/Documents/GitHub/ALL_DATA/Data/Nest ID - 2024.csv")
 temp <- dplyr::filter(nestcoords, !is.na("Lat"))
 bsite <- "Pohatu" 
 xx <- data.frame()
 tracks <- data.frame()
 
-folder_in <- "C:/Users/rphic/OneDrive/Pohatu_data/Breeding_2022"
+folder_in <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2022"
 folder_out <- "data"
 files_list_in <- list.files(path = folder_in, pattern = "*.csv", full.names = FALSE)
 files_list_out <- list.files(path = folder_out, pattern = "*.csv", full.names = FALSE)
@@ -136,9 +141,8 @@ tofix <- function(toread, folder_in, folder_out){
   marine <- cbind(marine, latlon) 
   
   # Making marine df a SpatialPointsDataFrame
-  coordinates(marine) <- c("lon","lat") 
-  crs(marine) <- nzmg2000 # lat long not Northing Easting 
-  marine <- spTransform(marine, nztm)
+  marine <- st_as_sf(marine, coords = c("lon","lat"), crs = st_crs(wgs84)) # lat long not Northing Easting 
+  marine <- st_transform(marine, 2193)
   
   # Subsetting points to include only those that are within the ocean, saving
   # (some GPS devices were not turned off, so there are land points) 
@@ -161,8 +165,7 @@ tofix <- function(toread, folder_in, folder_out){
                          date = marine_df$timestamp_NZDT,
                          id = marine_df$ID,
                          burst = marine_df$trips,
-                         typeII = TRUE, 
-                         proj4string = nztm)
+                         typeII = TRUE)
   
   # Regularisation of movement trajectory to every 1 minutes  
   # Settings on GPS to take location every 60 sec
@@ -181,6 +184,50 @@ tofix <- function(toread, folder_in, folder_out){
   #plot(traj_red)
   #plot(traj_red[1])
   
+  ###  TRYING OUT SECOND INTERPOLATIONS FOR DIVES
+  # Regularisation of movement trajectory to every 1 minutes  
+  # Settings on GPS to take location every 60 sec
+  refda <- round_date(min(marine_df$timestamp_NZDT, na.rm = TRUE), unit = "sec") # The reference time stamp
+  traj_na <- setNA(trajectory, refda, 1, units = "sec") # Adds NA values every 60 sec
+  traj_eq <- sett0(traj_na, refda, 1, units = "sec")  # Rounds each interval to nearest min
+  traj_int <- redisltraj(na.omit(traj_eq), 1, type = "time") # Linearly interpolates points every 1 min
+  #X11(type = "Xlib")
+  #trajdyn(traj_red)
+  df_traj <- ld(traj_int) # ltraj to dataframe  
+  df_traj <- df_traj[!is.na(df_traj$x), ]
+  df_traj <- df_traj[!is.na(df_traj$y), ]
+  df_traj$burst <- as.numeric(as.character(df_traj$burst))
+  df_traj <- df_traj[order(df_traj$burst), ] 
+  traj_red <- dl(df_traj) # Dataframe to ltraj  
+  #plot(traj_red)
+  #plot(traj_red[1])
+  
+  divefull_join <- cc %>%
+    left_join(df_traj, by = c("timestamp_UTC" = "date")) %>%
+    mutate(depth = ifelse(depth < 1, 0, depth))
+  
+  library(plotly)
+  # Create the 3D scatter plot
+  plot_ly(data = divefull_join[divefull_join$burst == 1,], x = ~x.y, y = ~y.y, z = ~-depth,
+          type = "scatter3d", 
+          mode = "lines+markers", 
+          marker = list(size = .5),  # Small dots
+          line = list(width = 2),   # Line width
+          text = timestamp,         # Hover information: timestamp
+          hoverinfo = "text"        # Show timestamp on hover
+  ) %>%
+    layout(
+      title = "3D Plot with Small Dots and Lines Based on Timestamp",
+      scene = list(
+        xaxis = list(title = "X Axis"),
+        yaxis = list(title = "Y Axis"),
+        zaxis = list(title = "Z Axis")
+      )
+    )
+  
+  
+  
+  ###
   shpoint_dive <- marine_df
   coordinates(shpoint_dive) <- ~lon + lat
   crs(shpoint_dive) <- nztm

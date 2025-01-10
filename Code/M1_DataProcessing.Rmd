@@ -405,6 +405,8 @@ parents_years <- parents_compare %>%
 
 clipr::write_clip(parents_years)
 
+# Birds age 2
+
 ```
 
 ```{r}

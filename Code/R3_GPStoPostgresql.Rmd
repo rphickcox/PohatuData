@@ -1,0 +1,104 @@
+---
+title: "Adding GPS data to postgresql database"
+author: "Rachel Hickcox"
+date: "2025"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("broom", "readxl", "flextable", "googlesheets4", "googledrive",
+          "lubridate", "tidyverse", "dplyr", "magrittr", "DBI", "RPostgreSQL", "data.table")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+```{r uploadpar}
+# Function to upload a file to a table as a new partition
+upload_to_partition <- function(conn, file_path, table_name, partition_column) {
+  # Read the file into a data frame
+  data <- fread(file_path, 
+                colClasses = c("character","character", "numeric","numeric", 
+                               "numeric", "character", rep("numeric", 9)), 
+                nThread = 4)
+  
+  # Takes forever
+  data$Timestamp <- as.POSIXct(data$Timestamp, format = "%d/%m/%Y %H:%M:%S")
+  
+  names(data) <- c("tag_id", "timestamp", "x", "y", "z", "activity", "depth", 
+                   "temp", "latitude", "longitude", "height_msl", "ground_speed", 
+                   "satellites", "hdop", "signal_strength")
+  
+  # Extract partition value from the file name (without the file extension)
+  partition_value <- data[[1,1]]
+  
+  # Ensure that the partition column exists in the data and set it to the partition value
+  if (!partition_column %in% colnames(data)) {
+    stop(sprintf("Column '%s' not found in data frame", partition_column))
+  }
+  data[[partition_column]] <- partition_value  # Set the partition column to the partition value
+  
+  # Create the partition table directly with the partition name from the file
+  create_partition_query <- sprintf(
+    "CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES IN ('%s');",
+    partition_value, table_name, partition_value)
+  dbExecute(conn, create_partition_query)
+  
+  # THIS TAKES FOREVER!
+  dbWriteTable(conn, table_name, data, append = TRUE, row.names = FALSE)
+  
+  message(sprintf("Data from '%s' uploaded to partition '%s' successfully.", file_path, partition_value))
+}
+
+```
+
+```{r connect}
+# Replace with your PostgreSQL credentials and file details
+db_credentials <- list(
+  dbname = "PohatuDB",
+  host = "localhost",
+  port = 5433,
+  user = "postgres",
+  password = "postgres"
+)
+
+table_name <- "s_gps_data"       # Table name in the database
+partition_column <- "tag_id" # Column used for partitioning
+
+# Connect to the database
+conn <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = db_credentials$dbname,
+  host = db_credentials$host,
+  port = db_credentials$port,
+  user = db_credentials$user,
+  password = db_credentials$password)
+```
+
+```{r}
+# Process all CSV files in the folder
+folder_path <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2022"
+
+tryCatch(
+  {
+    csv_files <- list.files(folder_path, pattern = "\\.csv$", full.names = TRUE)[2]
+    #csv_files <- list.files(folder_path, pattern = "\\.csv$", full.names = TRUE)
+    
+    for (file_path in csv_files) {
+      upload_to_partition(conn, file_path, table_name, partition_column)
+    }
+  },
+  error = function(e) {
+    message("Error: ", e$message)
+  },
+  finally = {
+    dbDisconnect(conn) # Ensure the connection is closed
+  }
+)
+```
+
