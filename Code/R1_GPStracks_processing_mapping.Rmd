@@ -13,11 +13,10 @@ editor_options:
 
 ### Load packages 
 ```{r}
-pkgs <- c("tidyr", "plyr", "raster", "terra", "sf", "dismo", "maptools", 
-          "ggplot2", #"SDMTools", "moveHMM",
-          "rgeos", "rgeos", "rgdal", "stringr", "sdm", "lubridate", "dplyr", 
+pkgs <- c("tidyr", "plyr", "terra", "sf", "ggplot2",
+          "lubridate", "dplyr", "ggspatial", "stringr",
           "spThin", "diveMove", "adehabitatHR", "data.table", "reshape2", #"tlocoh", 
-          "knitr", "flextable", "here", "argosfilter")
+          "knitr", "flextable", "here", "argosfilter", "basemaps", "osmdata", "ggmap")
 invisible(lapply(pkgs, library, character.only = TRUE))
 #load_pkgs(pkgs)
 options(scipen = 999)
@@ -51,15 +50,17 @@ bsite <- "Pohatu"
 xx <- data.frame()
 tracks <- data.frame()
 
-folder_in <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2022"
-folder_out <- "data"
+folder_in <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2024"
+folder_out <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2024_clean"
 files_list_in <- list.files(path = folder_in, pattern = "*.csv", full.names = FALSE)
 files_list_out <- list.files(path = folder_out, pattern = "*.csv", full.names = FALSE)
-files_list <- list.files(path = folder_out, pattern = "*.csv", full.names = FALSE)
+#files_list <- list.files(path = folder_out, pattern = "*.csv", full.names = FALSE)
 
 # Df of file names from wd used to assign microchip number/sex,year, season assigned to variables
 files_fix <- files_list_in[!files_list_in %in% files_list_out]
+
 files_read <- files_list_in[files_list_in %in% files_list_out]
+files_read <- files_list_out
 ```
 
 ### Toread function
@@ -75,23 +76,26 @@ toread <- function(toread, folder_in, folder_out){
   nam <- toupper(nam)
   point_bathy <- fread(paste(folder_out, toread, sep = "/"),  
                        data.table = FALSE, sep = ",", fill = TRUE)
-  
-  tripno <- max(point_bathy$trips)
-  tstart <- min(point_bathy$timestamp_NZDT, na.rm = TRUE)
-  tend <- max(point_bathy$timestamp_NZDT, na.rm = TRUE)
-  n <- nrow(point_bathy)
-  duration_h <- as.double(difftime(point_bathy[nrow(point_bathy), 15], point_bathy[1, 15]), 
-                          units = "hours") # From first dive to last dive event
-  dis_travelkm <- sum(point_bathy$distance.m, na.rm = TRUE)/1000
-  
-  meandepth <- mean(point_bathy$depth, na.rm = TRUE)
-  maxdepth <- max(point_bathy$depth, na.rm = TRUE)
-  dist_nest_max <- max(point_bathy$dist_nest, na.rm = TRUE)/1000
-  
-  xxx <- data.frame(nam, nb, tripno, n, tstart, tend, duration_h, dis_travelkm, 
-                    meandepth, maxdepth, dist_nest_max) %>%
-    mutate(meandepth = na_if(meandepth, "NaN"), maxdepth = na_if(maxdepth, "-Inf"))
-  tracks <- list(xxx, point_bathy)
+  point_bathy$season <- season
+  point_bathy$year <- year
+  tracks <- point_bathy
+
+  # tripno <- max(point_bathy$trips)
+  # tstart <- min(point_bathy$timestamp_NZDT, na.rm = TRUE)
+  # tend <- max(point_bathy$timestamp_NZDT, na.rm = TRUE)
+  # n <- nrow(point_bathy)
+  # duration_h <- as.double(difftime(point_bathy[nrow(point_bathy), 15], point_bathy[1, 15]), 
+  #                         units = "hours") # From first dive to last dive event
+  # dis_travelkm <- sum(point_bathy$distance.m, na.rm = TRUE)/1000
+  # 
+  # meandepth <- mean(point_bathy$depth, na.rm = TRUE)
+  # maxdepth <- max(point_bathy$depth, na.rm = TRUE)
+  # dist_nest_max <- max(point_bathy$dist_nest, na.rm = TRUE)/1000
+  # 
+  # xxx <- data.frame(nam, nb, tripno, n, tstart, tend, duration_h, dis_travelkm, 
+  #                   meandepth, maxdepth, dist_nest_max) %>%
+  #   mutate(meandepth = na_if(meandepth, "NaN"), maxdepth = na_if(maxdepth, "-Inf"))
+  # tracks <- list(xxx, point_bathy)
   return(tracks)
 }
 ```
@@ -313,17 +317,33 @@ points_to_line <- function(data, long, lat, id_field = NULL, sort_field = NULL) 
 
 tracks <- lapply(FUN = toread, files_read,
                  folder_in = folder_out, folder_out = folder_out)
+
 tracks_fix <- lapply(FUN = tofix, files_fix,
                      folder_in = folder_in, folder_out = folder_out)
 ```
 
 ### Mapping
 ```{r}
+tt <- tracks
+tracks <- bind_rows(tracks) %>%
+  filter(!is.na(date)) %>%
+  arrange(id, date)
+
+# Convert the dataframe to a sf object (Points)
+sf_points <- st_as_sf(tracks, coords = c("X", "Y"), crs = 2193)
+sf_lines <- sf_points %>%
+  st_as_sf(coords = c("x", "y"), crs = 2193) %>%
+  group_by(id, season, year) %>%
+  dplyr::summarize(do_union=FALSE) %>%  # do_union=FALSE doesn't work as well
+  st_cast("LINESTRING") 
+
+maplines <- sf_lines %>% st_transform(crs = 4326)
+
 # Colors
-maplines$Lines <- as.factor(unique(tomap$Points))
-maplines$ID <- as.factor(unique(tomap$Points))
+maplines$Lines <- as.factor(unique(tracks$id))
+maplines$ID <- as.factor(unique(tracks$id))
 colours2 <- colorFactor(
-  palette = "viridis", 
+  palette = "Set3", 
   domain = maplines$Lines)
 
 labelFormat <- function(type, cuts, p){ 
@@ -332,6 +352,8 @@ labelFormat <- function(type, cuts, p){
   for(i in 2:(n-1)){cuts[i] = ""} 
   cuts[1] = "Trip start" 	
   paste0(cuts[-n], cuts[-1])}
+
+
 
 leaflet() %>% 
   #addCircles(lng = ~Long, lat = ~Lat) %>%
@@ -361,5 +383,104 @@ leaflet::addLegend(pal = colours2,
                    values = maplines$Lines,
                    position = 'bottomleft',
                    title = 'Lines', 
-                   group = 'Lines')
+                   group = 'Lines') %>%
+    addLayersControl(
+    overlayGroups = "Lines",
+    options = layersControlOptions(collapsed = FALSE)) %>% 
+  addScaleBar("bottomleft")
+
 ```
+
+
+```{r}
+tt <- tracks
+tracks <- bind_rows(tracks) %>%
+  filter(!is.na(date)) %>%
+  arrange(id, date)
+
+# Convert the dataframe to a sf object (Points)
+sf_points <- st_as_sf(tracks, coords = c("X", "Y"), crs = 2193)
+sf_lines <- sf_points %>%
+  st_as_sf(coords = c("x", "y"), crs = 2193) %>%
+  group_by(id, year, season) %>%
+  dplyr::summarize(do_union=FALSE) %>%  # do_union=FALSE doesn't work as well
+  st_cast("LINESTRING") 
+
+maplines <- sf_lines %>% st_transform(crs = 4326)
+
+# Bounding box 
+set_defaults(map_service = "esri", map_type = "world_ocean_base")
+sa_bb1 <- st_bbox(sf_points)
+sa_bb <- st_polygon(list(rbind(c(sa_bb1$xmin, sa_bb1$ymin),
+                               c(sa_bb1$xmax, sa_bb1$ymin),
+                               c(sa_bb1$xmax, sa_bb1$ymax),
+                               c(sa_bb1$xmin, sa_bb1$ymax),
+                               c(sa_bb1$xmin, sa_bb1$ymin))))
+sa_bb <- st_sf(geometry = st_sfc(sa_bb), crs = 2193)
+sa_bb <- st_buffer(sa_bb, 3000)
+sa_bb <- st_transform(sa_bb, crs = 4326)
+sa_bb <- st_bbox(sa_bb)
+names(sa_bb) <- c("left", "bottom", "right", "top")
+
+# Plot
+pplot <- 
+  ggplot() + 
+ #basemap_gglayer(sa_bb) +
+  scale_fill_identity() + 
+  coord_sf(expand = FALSE) +
+  geom_sf(
+    dat = sf_lines, 
+    mapping = aes(geometry = geometry,
+                  color = id), alpha = 0.9) +
+  facet_wrap(vars(season, year), nrow = 3) +
+  labs(x = "Longitude", y = "Latitude") +
+  scale_color_viridis_d() +
+  guides(color = guide_legend(title = "Bird ID", theme(legend.title.position = "top"), 
+                         nrow = 2, byrow = TRUE)) +
+  ggspatial::annotation_north_arrow(location = "bl", data = subset(sf_lines, season == "POSTGUARD"), text_col = "white") +
+  ggspatial::annotation_scale(location = "br", data = subset(sf_lines, season == "POSTGUARD"), text_col = "white") +
+  scale_x_continuous(expand = c(0,0)) + # Adjust x-axis breaks
+  scale_y_continuous(expand = c(0,0)) +
+  theme_classic() +
+  theme(legend.position = "bottom", 
+        legend.box = "horizontal", 
+        axis.text = element_text(size = 12),
+        plot.margin = margin(0, 0, 0, 0)  # Remove white space around the plot
+  ) 
+pplot
+```
+
+```{r}
+# Define the coordinate for Banks Peninsula, New Zealand (approximate)
+banks_peninsula <- st_sfc(st_point(c(172.872, -43.800)), crs = 4326)
+
+# Create a buffer of 100km around Banks Peninsula (sf object)
+buffer_100km <- st_buffer(banks_peninsula, dist = 100000)  # 100 km in meters
+
+# Plot the satellite image basemap using ggmap (OpenStreetMap satellite tiles)
+# Note: No API is required in this case for basemap but we do need internet access for download.
+# Specify the bounding box for Banks Peninsula
+bbox <- st_bbox(buffer_100km)
+
+# Download a satellite basemap (OpenStreetMap)
+map <- ggmap::get_map(location = c(lon = mean(c(bbox["xmin"], bbox["xmax"])), 
+                            lat = mean(c(bbox["ymin"], bbox["ymax"]))),
+               zoom = 10, 
+               maptype = "satellite", source = "osm")
+
+# Convert the 'sf' object to a data frame for ggplot
+buffer_df <- st_as_sf(buffer_100km)
+
+# Plot the map using ggplot
+ggplot() +
+  # Display satellite image base map
+  annotation_raster(map, xmin = bbox["xmin"], xmax = bbox["xmax"], ymin = bbox["ymin"], ymax = bbox["ymax"]) +
+  # Add the buffer polygon from the 'sf' object
+  geom_sf(data = buffer_df, fill = NA, color = "red", size = 1) +
+  # Customize the plot
+  theme_minimal() +
+  ggtitle("100km Buffer Around Banks Peninsula, NZ") +
+  coord_sf(xlim = c(bbox["xmin"], bbox["xmax"]), ylim = c(bbox["ymin"], bbox["ymax"]), expand = FALSE)
+
+```
+

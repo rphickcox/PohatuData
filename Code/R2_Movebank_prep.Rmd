@@ -16,47 +16,42 @@ options(scipen = 999)
 
 ### Reading in text files
 ```{r}
-folder_in <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2023"
+folder_in <- "C:/Users/rphic/OneDrive/Documents/Pohatu_data/Breeding_2024"
 files_list_in <- list.files(path = folder_in, pattern = "^[^DUD].+\\.txt$", full.names = FALSE)
 files_list_full <- list.files(path = folder_in, pattern = "^[^DUD].+\\.txt$", full.names = TRUE)
 
-deploy <- read_excel("C:/Users/rphic/OneDrive/Documents/Pohatu_data/GPS_tracking_metadata.xlsx", sheet = "Deployments 2023-2024")
-deploy <- deploy[c(1, 8, 9)]
+deploy <- read_excel("C:/Users/rphic/OneDrive/Documents/Pohatu_data/GPS_tracking_metadata.xlsx", sheet = "Deployments 2024-2025")
+deploy <- deploy[c(1, 8, 10)]
 names(deploy) <- c("GPSID", "AnimalID", "NestID")
 ```
-
-### Toread function
-```{r}
-getname <- function(files_list_in){
-  nam <- unlist(strsplit(files_list_in, "_"))
-  year <- unlist(strsplit(nam[[4]], "[.]"))
-  year <- paste(str_sub(year[[1]], 1, 7 ))
-  season <- paste(nam[[3]])
-  season <- toupper(season)
-  nb <- paste(nam[[1]])
-  nam <- paste(nam[[2]])
-  nam <- toupper(nam)
-  c(tolower(nam), year, tolower(season), nb)
-}
-
-named <- lapply(files_list_in, getname)
-
-# Convert xx to a dataframe
-named <- data.frame(matrix(unlist(named), nrow = length(named), byrow = TRUE))
-colnames(named) <- c("Name", "Year", "Season", "Nb")
-```
-
 
 ```{r}
 # Define a function to read each file
 read_file <- function(i) {
+  
+  nam <- unlist(strsplit(files_list_in[i], "_"))
+  year <- unlist(strsplit(nam[[4]], "[.]"))
+  year <- paste(str_sub(year[[1]], 1, 7 ))
+  season <- paste(nam[[3]])
+  season <- tolower(season)
+  nb <- paste(nam[[1]])
+  nam <- paste(nam[[2]])
+  nam <- tolower(nam)
+  gpsid <- filter(deploy, AnimalID == str_sub(nam, 2))
+  
   x <- read.delim(files_list_full[i], header = FALSE, strip.white = TRUE, blank.lines.skip = TRUE)  # Adjust this based on the format of your files
+  
+  if (length(x) == 9) {
+     x$V1 <- paste(x$V1, x$V2, sep = ",")
+ x <- select(x, -V2)
+  }
   names(x) <- c("Timestamp", "Latitude", "Longitude", "HeightAboveSL", "groundspeed", "Satellites", "HDOP", "SignalStrength")
   x <- x %>%
     mutate("Species" = "Eudyptula minor", 
-           "AnimalID" = named[i,]$Name, 
-           "Sensor" = "GPS") %>%
-    left_join(deploy, by = "AnimalID")
+           "AnimalID" = nam,
+           "GPSID" = gpsid$GPSID,
+           "Sensor" = "GPS")
+  #x <- filter(x, !is.na(Timestamp))
   x
 }
 
@@ -69,4 +64,3 @@ write.csv(combined_df, file.path(folder_in, "Alldata_movebank.csv"), row.names =
 
 ```
 
- 

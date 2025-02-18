@@ -9,7 +9,7 @@ editor_options:
 
 ### Load packages
 ```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
-pkgs <- c("knitr", "kableExtra", "broom", 
+pkgs <- c("knitr", "kableExtra", "broom", "janitor", "here", 
           "readxl", "flextable", "terra", "googlesheets4", "googledrive", 
           "lubridate", "tidyverse", "openxlsx")
 new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
@@ -33,13 +33,6 @@ drive_download(file = "https://docs.google.com/spreadsheets/d/1qh6zAXgVokfdx4Wjj
                path = "./../ALL_DATA/Data/Nest ID.xlsx")
 nestid <- read_excel("./../ALL_DATA/Data/Nest ID.xlsx")
 
-nestid2 <- nestid %>% 
-  separate(col = Location, into = c("Lat", "Lon"), sep = ",", remove = FALSE) %>% 
-  mutate(Lat = ifelse(str_detect(`Nest ID`, "^DUD"), NA, Lat), 
-         Lon = ifelse(str_detect(`Nest ID`, "^DUD"), NA, Lon)) %>% 
-  arrange(`Nest ID`)
-write.csv(nestid2, "./../ALL_DATA/Data/Nest ID.csv")
-
 drive_download(file = "https://docs.google.com/spreadsheets/d/16c4c5nXbz_PFf7iyN2DG7fExsi4P5uP-NSYAbCDX1rc", 
                overwrite = TRUE, 
                path = "./../ALL_DATA/Bird ID.xlsx")
@@ -52,28 +45,32 @@ birdid <- read_excel("./../ALL_DATA/Bird ID.xlsx")
 tdt <- floor_date(today(), "weeks", week_start = 1) # lubridate start of week
 tdt_d <- format(tdt, "%d-%m-%Y") # character today's start of week date 
 tdt_s <- as.numeric(str_replace_all(as.character(tdt), pattern = "-", "")) # string
-yr <- ifelse(month(today()) > 8, year(today()), year(today())-1) # yr
+yr <- ifelse(month(today()) > 7, year(today()), year(today())-1) # yr
 start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1) # start date
 end <- as.Date(paste0("01-09-", yr + 1), "%d-%m-%Y")
 non_br <- as.Date(paste0("01-04-", yr + 1), "%d-%m-%Y")
 dates_df <- seq(start, today(), 7)
 ```
 
-### CHOOSING NEST YEAR
-```{r ny}
-yr <- ifelse(month(today()) > 8, year(today()), year(today())-1) # yr
-#yr <- 2022
+### Dataframe preparation
+```{r dataprep}
+
+source("../ALL_CODE/gd_functions.R")
+
+# Replace spaces with underscores in column names
+monitor <- clean_monitor(monitor)
+nestid <- clean_nestid(nestid)
+birdid <- clean_birdid(birdid)
 ```
 
+##################################
+# START HERE #####################
+##################################
+##################################
+##################################
 
 ### Nests summary
 ```{r nests}
-# Nest coords 
-nestid_coord <- nestid %>%
-  tidyr::separate(Location, into = c("Lat", "Long"), ",") %>%
-  dplyr::select(`Nest ID`, Lat, Long) %>%
-  mutate(Lat = as.numeric(Lat), Long = as.numeric(Long))
-
 nests <- monitor %>%
   distinct(across(DateTime:`Chick 4 weight`), .keep_all = TRUE) %>%
   mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1),
@@ -92,7 +89,20 @@ nests <- monitor %>%
   #          `Nest activity` == "FAILED" | 
   #          `Nest activity` == "Empty") %>%
   mutate(`Nest activity` = ifelse(Interaction == "Uplifted", 
-                                  "Uplifted",`Nest activity`))
+                                  "Uplifted",`Nest activity`)) %>%
+    # Flag where a new nest starts
+  mutate(NewNestFlag = case_when(
+      `Nest activity` %in% c("Eggs/Chicks present", "Uplifted", "Marking") & (lag(`Nest activity`) %in% c(NA, "Loafing adult(s)", "FAILED", "Moulting")) ~ 1,
+      TRUE ~ 0),
+    # Increment only at the last occurrence of NA/Not breeding before a new nest starts
+    Nest_number = cumsum(NewNestFlag)
+  ) %>%
+  #ungroup() %>%
+  mutate(Nest_number = ifelse(Nest_number == 0, NA, Nest_number), 
+         NestID_count = n_distinct(Nest_number, na.rm = TRUE)) %>%  # Count distinct Nest_numbers per FullID
+  mutate(FullID = ifelse(NestID_count > 1 & !is.na(NestID_count), paste(FullID, Nest_number, sep = "_"), FullID)) %>%
+  select(-c(NewNestFlag, NestID_count, Nest_number)) # Remove temporary column after use
+
 
 nests <- nests %>%
   mutate(.after = 2,
@@ -464,6 +474,7 @@ nests_outcome <- nests_outcome %>%
   mutate(EC1Fate = ifelse(Status == "Fledged" & NFledged <= 2, "Fledged", EC1Fate), 
          EC2Fate = ifelse(Status == "Fledged" & NFledged == 2, "Fledged", EC2Fate), 
          Comments = str_squish(Comments)) %>%
+ mutate(across(Est_LayDate:FledgeDate, ~ dmy(.))) %>%
   select(NestYear, SeasonID, NestID, starts_with("Adult"), Status, NLaid:diffchicks, NFledged, EC1Fate:EC2Intervention, Chick1ID:Chick2ID, Est_LayDate:FledgeDate, Comments, Nvisits)
 ```
 
