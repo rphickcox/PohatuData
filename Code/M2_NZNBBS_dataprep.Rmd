@@ -18,7 +18,7 @@ non_br <- as.Date(paste0("01-04-", yr + 1), "%d-%m-%Y")
 
 ### Reading in cleaned yearly summary of breeding
 ```{r breedingsum}
-breeding <- read_excel("./../ALL_DATA/Data/BreedingSeason_2023_finalsummary_edited.xlsm")
+breeding <- read_excel("../ALL_DATA/Data/2024-2025/BreedingSeason_2024_finalsummary_edited.xlsm")
 breeding <- breeding %>% 
   select(NestID:Status, NFledged) %>%
   pivot_longer(cols = c("Adult1ID", "Adult2ID"), names_to = "X", values_to = "BirdID" ) %>% 
@@ -26,6 +26,20 @@ breeding <- breeding %>%
   select(-c(Status, X))
 ```
 
+### Bird banding numbers
+```{r}
+df <- read_excel("../ALL_DATA/Data/NZNBBS_trainees_log.xlsx", sheet = 2)
+# df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell",
+#                        "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine", 
+#                        "Joey", "Ben", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
+#                  y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", 
+#                        "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell", "Georgia Gwatkin", 
+#                        "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", 
+#                        "Geraldine Guillemont-Peacock", "Josephine Cataliotti", 
+#                        "Benoit Navarron", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
+#                  n = c("0722", "0786", "1121", "0791", "1017", "1150","1191", "1153", "1157", "1158", "1120", "1119", "1118", "0724", "1354", "0870"))
+
+```
 
 ### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
 ```{r birdid}
@@ -54,15 +68,6 @@ x[is.na(x)] <- ""
 names(x) <- colnam
 
 monitor <- mutate(monitor, DT = format(DateTime, "%d/%m/%Y 00:00"))
-df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell",
-                       "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine", 
-                       "Joey", "Ben", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
-                 y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", 
-                       "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell", "Georgia Gwatkin", 
-                       "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", 
-                       "Geraldine Guillemont-Peacock", "Josephine Cataliotti", 
-                       "Benoit Navarron", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
-                 n = c("0722", "0786", "1121", "0791", "1017", "1150","1191", "1153", "1157", "1158", "1120", "1119", "1118", "0724", "1354", "0870"))
 
 xx <- monitor[c(39, 3, 16, 17)] %>% distinct()
 
@@ -70,8 +75,9 @@ marking <- birdid %>%
   dplyr::select(`Bird ID`, Sex:Site_marking, Status_marking, Tagger, `Nest ID_marking`:`Bill depth_marking`) %>% 
   mutate(.before = 1, DT = format(DateTime_marking, "%d/%m/%Y 00:00")) %>% 
   left_join(xx, by = c("DT" = "DT", "Nest ID_marking" = "Nest ID")) %>% 
+  filter(!duplicated(`Bird ID`)) %>% # This removes duplicates, a bit indiscriminately
   distinct() %>% 
-  mutate(yr = ifelse(month(DateTime_marking) > 8, year(DateTime_marking), year(DateTime_marking)-1),
+  mutate(yr = ifelse(month(DateTime_marking) > 7, year(DateTime_marking), year(DateTime_marking)-1),
          Site_marking = ifelse(Site_marking == "Flea Bay" & Status_marking == "In rehabilitation", 
                                "Release site", "Wild"), 
          Site_marking = ifelse(Site_marking == "Wild" & Status_marking == "In rehabilitation", 
@@ -110,7 +116,7 @@ marking <- birdid %>%
          Detail4	= "nest number", Units4	= "nest number", Data4 = `Nest ID_marking`) %>% 
   bind_cols(x[73:93]) %>% 
   mutate(Project_Name	= "Pōhatu Little Penguins", Species_Group	= "Penguins") %>% 
-  filter(yr == 2023 ) %>% 
+  dplyr::filter(yr == 2024) %>% # USING YR DOESNT WORK, NEEDS TO BE CHANGED EVERY TIME?
   dplyr::select(-c(DT:`Bill length_marking`, 'Bill depth_marking', yr))
 
 marking_fix <- marking %>% 
@@ -126,15 +132,24 @@ marking_fix <- marking %>%
                                  "53. On empty nest", status_detail1)) %>%  
   mutate(Age = recode(Age, "Adult" = "A", "Chick" = "C", "Juvenile" = "J", "Unknown" ="U"), 
          Age = ifelse(is.na(Age), "U", Age), 
-         Sex_ = recode(Sex_, "Female" = "FU", "Male" = "U", "Unknown" = "U"),
+         Sex_ = case_when(
+           Sex_ == "Female" ~ "FU", 
+         Sex_ == "Male" ~ "MU",   
+         Sex_ == "Female-DNA" ~ "F", 
+         Sex_ == "Male-DNA" ~ "M",
+         Sex_ == "Female-DNAx" ~ "F", 
+         Sex_ == "Male-DNAx" ~ "M",
+         TRUE ~ "U"),
          Sex_ = ifelse(is.na(Sex_), "U", Sex_), 
          status_detail1 = ifelse(Age == "C", "40. Chick in nest", status_detail1),
          Non_leg_mark_id_2 = paste(Prefix_number, Number, sep = "-")) %>% 
-  group_by(Data4) %>% 
-  mutate(Sex_ = ifelse(Sex_ == "U" & "FU" %in% Sex_, "MU", Sex_)) %>% 
-  left_join(df, by = c("Bander_name" = "x"), keep = FALSE) %>% 
-  mutate(Bander_name = y, Bander_number = n) %>% 
-  dplyr::select(-c(Eggs, Chicks, Condition, y, n)) %>%
+  #group_by(Data4) %>% 
+  #mutate(Sex_ = ifelse(Sex_ == "U" & "FU" %in% Sex_, "MU", Sex_)) %>% 
+  left_join(df[1:3], by = c("Bander_name" = "NameApp"), keep = FALSE) %>% 
+  mutate(Bander_name = Person, Bander_number = ifelse(nchar(`NZNBBS ID`) < 4, paste0("0", `NZNBBS ID`), `NZNBBS ID`)) %>%
+  mutate(Bander_name = ifelse(is.na(Bander_name), "Rachel Hickcox", Bander_name)) %>%
+  mutate(Bander_number = ifelse(Bander_name == "Rachel Hickcox" & is.na(Bander_number), "0722", Bander_number)) %>%
+  dplyr::select(-c(Eggs, Chicks, Condition, Person, `NZNBBS ID`)) %>%
   mutate(across(everything(), as.character))
 
 names(marking_fix) <- colnam
@@ -144,7 +159,7 @@ marking_fix %>%
   summarise(Age = unique(Age), 
             Count = n())
 
-write.xlsx(marking_fix, "../ALL_DATA/Data/NZNBBS_PohatuPenguins_2023_2024_R.xlsx", rowNames = FALSE)
+write.xlsx(marking_fix, "../ALL_DATA/Data/2024-2025/NZNBBS_PohatuPenguins_2024_2025_R.xlsx", rowNames = FALSE)
 ```
 
 ### RESIGHTINGS Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
@@ -278,7 +293,14 @@ resight_all <- resight_all %>%
   mutate(Project_Name	= "Pōhatu Little Penguins", Species_Group	= "Penguins") %>% 
   mutate(Age = recode(Age, "Adult" = "A", "1" = "J", "2" = "A", "Unknown" ="U"), 
          Age = ifelse(is.na(Age), "U", Age), 
-         Sex = recode(Sex, "Female" = "FU", "Male" = "MU", "Unknown" = "U"),
+         Sex = case_when(
+           Sex == "Female" ~ "FU", 
+         Sex == "Male" ~ "MU",   
+         Sex == "Female-DNA" ~ "F", 
+         Sex == "Male-DNA" ~ "M",
+         Sex == "Female-DNAx" ~ "F", 
+         Sex == "Male-DNAx" ~ "M",
+         TRUE ~ "U"),
          Sex = ifelse(is.na(Sex), "U", Sex)) %>% 
   filter(Age != 0) %>% 
   dplyr::select(-c(DateTime:Morph)) %>%
@@ -293,5 +315,5 @@ names(resight_all) <- colnam
 resight_birdid
 
 all <- marking_fix %>% bind_rows(resight_all)
-write.xlsx(all, "../ALL_DATA/Data/NZNBBS_PohatuPenguins_2023_2024_R.xlsx", rowNames = FALSE)
+write.xlsx(all, "../ALL_DATA/Data/2024-2025/NZNBBS_PohatuPenguins_2024_2025_R.xlsx", rowNames = FALSE)
 ```

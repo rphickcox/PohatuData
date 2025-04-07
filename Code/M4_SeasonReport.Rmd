@@ -30,26 +30,38 @@ cols <-  c("numeric", rep("text", 5), rep("numeric", 3), rep("text", 6),
 breeding <- lapply(list.files("./../ALL_DATA/Data", pattern = "finalsummary_edited.xlsm", full.names = TRUE,
                               recursive = TRUE, include.dirs = TRUE), 
                    read_excel, col_types = cols)
-names(breeding[[1]]) == names(breeding[[2]])
+#names(breeding[[1]]) == names(breeding[[2]])
 ```
+
 
 ### Summary tables
 ```{r}
 #x <- breeding[[2]]
 
 summary_nests <- function(x){
+  # Adults marked
+  df_br <- x %>%
+    pivot_longer(names_to = "Name", values_to = "BirdID", cols = c("Adult1ID", "Adult2ID")) %>%
+    filter(BirdID != "UM")
+  
+  # Chicks marked
+  df_ch <- x %>%
+    pivot_longer(names_to = "Name", values_to = "BirdID", cols = c("Chick1ID", "Chick2ID")) %>%
+    filter(BirdID != "UM")
   
   df <- x %>%
+    filter(rowSums(is.na(.)) < ncol(.)) %>%
     summarise(
       NestYear = unique(NestYear),
       Nests = nrow(x),
       Nestboxes = length(unique(NestID)),
-      TwoClutch = sum(grepl("\\.", SeasonID)),
+      TwoClutch = sum(grepl("[._]", SeasonID)),
       NestsFailed = length(Status[Status == "Failed"]),
       NestsUplifted = length(Status[Status == "Uplifted"]),
       NestsFledged = length(Status[Status == "Fledged"]),
       MarkedAdults = length(c(Adult1ID[Adult1ID != "UM"], Adult2ID[Adult2ID != "UM"])),
-      MarkedChicks = length(c(Chick1ID[!Chick1ID %in% c("NA", "UM")], Chick2ID[!Chick2ID %in% c("NA", "UM")])),
+      MarkedChicks = length(c(Chick1ID[!is.na(Chick1ID) & Chick1ID != "UM"], 
+                              Chick2ID[!is.na(Chick2ID) & Chick2ID != "UM"])),
       Laid = sum(NLaid),
       Hatched = sum(NHatched),
       Fledged = sum(NFledged),
@@ -58,17 +70,18 @@ summary_nests <- function(x){
       ZeroHatch = length(NHatched[NHatched == 0]),
       OneHatch = length(NHatched[NHatched == 1]),
       TwoHatch = Hatched - ZeroHatch - OneHatch,
-      Fledged_Assisted = length(c(EC1Fate[EC1Fate == "CFledgedAssisted"], EC2Fate[EC2Fate == "CFledgedAssisted"])),
-      Fledged_Natural = length(c(EC1Fate[EC1Fate == "CFledged"], EC2Fate[EC2Fate == "CFledged"])),
+      Fledged_Assisted = length(c(EC1Fate[EC1Fate %in% "CFledgedAssisted"], EC2Fate[EC2Fate %in% "CFledgedAssisted"])),
+      Fledged_Natural = length(c(EC1Fate[EC1Fate %in% "CFledged"], EC2Fate[EC2Fate %in% "CFledged"])),
       SF = length(c(EC1Intervention[EC1Intervention %in% c("SFR", "SF", "SFHR", "SFRH")], 
                     EC2Intervention[EC2Intervention %in% c("SFR", "SF", "SFHR", "SFRH")])),
       #fates = table(c(EC1Fate, EC2Fate)),
-      Percent_EggsHatched = round(Hatched/Laid*100, 2), # percent eggs laid that hatched
-      Percent_ChicksFledged = round(Fledged/Hatched*100, 2), # percent chicks fledged that hatched
-      Percent_ChicksFledged_natural = round(Fledged_Natural/Hatched*100, 2), # percent chicks fledged that hatched NO REHAB
-      BreedingSuccess = round(Hatched/Nests, 2), # fledged per breeding pair (i.e., nest)
-      FledgingSuccess = round(Fledged/Nests, 2), # fledged per breeding pair (i.e., nest)
-      FledgingSuccess_natural = round((Fledged-Fledged_Assisted)/Nests, 2), # fledged per breeding pair NO REHAB
+      Percent_EggsHatched_perLaid = round((Hatched/Laid)*100, 2), # percent eggs laid that hatched
+      Percent_ChicksFledged_perHatched = round((Fledged/Hatched)*100, 2), # percent chicks fledged that hatched
+      Percent_ChicksFledged_Natural_perHatched = round((Fledged_Natural/Hatched)*100, 2), # percent chicks fledged that hatched NO REHAB
+      Percent_ChicksFledged_perLaid = round((Fledged/Laid)*100, 2), # percent chicks fledged that were laid
+      HatchingSuccess_perPair = round(Hatched/Nests, 2), # fledged per breeding pair (i.e., nest)
+      FledgingSuccess_perPair = round(Fledged/Nests, 2), # fledged per breeding pair (i.e., nest)
+      FledgingSuccess_perPair_Natural = round((Fledged-Fledged_Assisted)/Nests, 2), # fledged per breeding pair NO REHAB
       LayDate_min = as.Date(min(Est_LayDate, na.rm = TRUE)),
       LayDate_mean = as.Date(mean(Est_LayDate, na.rm = TRUE)),
       LayDate_max = as.Date(max(Est_LayDate, na.rm = TRUE)),
@@ -77,13 +90,15 @@ summary_nests <- function(x){
       HatchDate_max = as.Date(max(HatchDate, na.rm = TRUE)),
       FledgeDate_min = as.Date(min(FledgeDate, na.rm = TRUE)),
       FledgeDate_mean = as.Date(mean(FledgeDate, na.rm = TRUE)),
-      FledgeDate_max = as.Date(max(FledgeDate, na.rm = TRUE))
- )
+      FledgeDate_max = as.Date(max(FledgeDate, na.rm = TRUE)), 
+      Adults_marked = nrow(df_br), 
+      Chicks_marked = nrow(df_ch)
+    )
   
   return(df)
 }
 
- 
+
 summary_list <- as.data.frame(t(bind_rows(lapply(breeding, summary_nests)))) %>%
   mutate(Variable = row.names(.), .before = 1) 
 names(summary_list) <- c("Variable", summary_list[1,2:length(summary_list)])
@@ -94,6 +109,6 @@ rownames(summary_list) <- NULL
 
 # Save
 ```{r}
-write.csv(summary_list, "./../ALL_DATA/Data/SeasonsSummaryReport.csv", row.names = FALSE)
+write.csv(summary_list, "./../ALL_DATA/Data/2024-2025/SeasonsSummaryReport.csv", row.names = FALSE)
 ```
 

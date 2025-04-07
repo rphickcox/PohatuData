@@ -144,7 +144,7 @@ monitor_groom2 <- dplyr::select(monitor_groom, -TOFIX)
 x <- gs4_find("Monitoring") %>% 
   filter(name == "Monitoring")
 
-xx <- anti_join(monitor, monitor_groom, )
+xx <- anti_join(monitor, monitor_groom)
 
 #write_sheet(monitor_groom2, ss = x, sheet = "Monitoring")
 ```
