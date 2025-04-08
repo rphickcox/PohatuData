@@ -494,72 +494,8 @@ nests_outcome_2022 <- read.xlsx(paste0("./../ALL_DATA/Data/2022-2023/", "Breedin
 ```
 
 
-### Getting information about the moult
-```{r moult}
-moult <- monitor %>%
-  filter(`Nest activity` == "Moulting") %>%
-  mutate(.before = 1, NestYear = ifelse(month(DateTime) > 7, 
-                                        year(DateTime), 
-                                        year(DateTime)-1),
-         FullID = ifelse(!is.na(`Nest ID`), 
-                         paste0(NestYear, `Nest ID`), NA))
 
-length(unique(moult$`Adult 1`))
-length(unique(moult$`Nest ID`))
-
-ccc <- unique(moult$NestYear)
-
-markedmoult <- lapply(ccc, function(ccc) {
-  moult %>%
-    filter(NestYear == ccc) %>% 
-    select(NestYear, FullID, `Nest ID`, `Adult 1`, `Adult 2`, `Adult 3`, `Adult 4`) %>% 
-    pivot_longer(c(`Adult 1`, `Adult 2`, `Adult 3`, `Adult 4`), names_to = "n", values_to = "AdultID") %>% 
-    filter(!is.na(AdultID)) %>% 
-    select(-n) %>% 
-    distinct() %>%
-    left_join(birdid_all, by = c("AdultID" = "Bird ID"), suffix = c("", "x"))
-})
-
-notmoult <- lapply(markedmoult, function(markedmoult) {
-  xx <- unique(markedmoult$NestYear)
-  birdid_all %>% 
-    filter(NestYear <= xx, 
-           !`Bird ID` %in% markedmoult$AdultID) %>% 
-    filter(!Age_current %in% c("0", "1", "Chick"))
-})
-
-notmoult_juv <- lapply(markedmoult, function(markedmoult) {
-  xx <- unique(markedmoult$NestYear)
-  birdid_all %>% 
-    filter(NestYear <= xx, 
-           !`Bird ID` %in% markedmoult$AdultID) %>% 
-    filter(Age_current == "1")
-})
-
-tmoult <- lapply(markedmoult, function(x){nrow(x)})
-tnotmoult <- lapply(notmoult, function(x){nrow(x)})
-
-
-# Number of 2-3 year olds that were also breeders
-xxx <- filter(markedmoult[[2]], Age_current %in% c(2, 3))
-ccc <- filter(parents, NestYear == 2024)
-table(ccc$ID %in% xxx$AdultID)
-
-# Number of breeding adults marked resighted at moult
-xxx <- filter(markedmoult[[2]], Age_current == "Adult")
-ccc <- filter(parents, NestYear == 2024)
-table(ccc$ID %in% xxx$AdultID)
-
-# Number of juveniles
-xxx <- filter(markedmoult[[2]], Age_current == 1)
-
-# Number of breeding adults marked resighted at breeding
-ccc <- filter(parents, NestYear == 2024)
-table(birdid_adults$`Bird ID` %in% ccc$ID)
-
-```
-
-### RESIGHTS
+### RESIGHTS AND MOULT
 ```{r resight}
 # Resights from birdid
 # resight_birdid <- birdid %>% 
@@ -613,7 +549,6 @@ resight_weird <- filter(resight, Status_resight %in% c("Breeding", "FAILED"))  %
   distinct() %>%
   filter(Age_current %in% c("1", "0"))
 
-
 # Resightings during breeding season
 resight_breeding <- filter(resight, Status_resight %in% c("Breeding", "FAILED"), 
                            !Age_current %in% c("1", "0"))  %>% 
@@ -636,8 +571,10 @@ resight_moult <- filter(resight, Status_resight == "Moulting") %>%
 #split(.$NestYear_resight)
 
 # Resightings LOAFING but no seen BREEDING OR MOULTING)
-resight_loaf <- filter(resight, Status_resight == "Loafing") %>% 
-  group_by(BirdID) %>%
+resight_loaf <- filter(resight, Status_resight == "Loafing") %>%
+ anti_join(resight_breeding, by = c("BirdID", "NestYear_resight")) %>%
+  anti_join(resight_moult, by = c("BirdID", "NestYear_resight")) %>%
+ group_by(BirdID) %>%
   mutate(n = n()) %>%
   group_by(BirdID, NestYear_resight) %>%
   mutate(n_year = n()) %>%
@@ -663,7 +600,8 @@ sum_birdid <- birdid_all %>%
          total_juveniles_marked = lag(total_chicks_marked),
          total_juveniles_marked = replace_na(total_juveniles_marked, 0),
          cumsum_juveniles_marked = cumsum(total_juveniles_marked),
-         total_breeding_age_marked = cumsum_adults_marked + lag(cumsum_juveniles_marked))
+         total_breeding_age_marked = cumsum_adults_marked + lag(cumsum_juveniles_marked), 
+         total_moult_age_marked = cumsum_adults_marked + lag(cumsum_juveniles_marked) + total_juveniles_marked)
 
 ## Breeders
 resight_df <- resight_breeding %>%
@@ -699,7 +637,43 @@ resight_df <- resight_breeding %>%
 
 ## Moulters
 moult_df <- resight_moult %>%
-
+  group_by(NestYear_resight) %>%
+  mutate(NestID = sub("^.{4}", "", FullID), .after = 1) %>%
+  mutate(Age_resight = NestYear_resight - NestYear, 
+         Age_resight = ifelse(Age_marking == "Adult", "Adult", Age_resight)) %>%
+  summarise(resight_1 = sum(Age_resight == "1", na.rm = TRUE), 
+            resight_2 = sum(Age_resight == "2", na.rm = TRUE), 
+            resight_3 = sum(Age_resight == "3", na.rm = TRUE), 
+            # Total birds that are not 1 or 2 upon resight
+            resight_adults = sum(!Age_resight %in% c("1", "2", "3"), na.rm = TRUE), 
+            resight_total = n(), 
+            diff_nestbox = sum(NestID != NestID_resight, na.rm = TRUE), 
+            same_nestbox = sum(NestID == NestID_resight, na.rm = TRUE)) %>%
+  full_join(sum_birdid, by = c("NestYear_resight" = "NestYear")) %>%
+  arrange(NestYear_resight) %>%
+  relocate(total_marked_year:total_adults_marked, .after = 1) %>%
+  mutate(.after = "resight_total", 
+         # Juves moult rate 
+         # Juves moulting from the marked chicks 2 years ago, i.e., cohort
+         `percent_resight_1/cohort` = 
+           round((resight_1/total_juveniles_marked)*100, 1), 
+         # 2 yr old moult rate 
+         # 2 year olds moulting from the marked chicks 2 years ago, i.e., cohort
+         `percent_resight_2/cohort` = 
+           round((resight_2/lag(total_juveniles_marked))*100, 1), 
+         # 3 yr old moult rate 
+         # 3 year olds moulting from the marked chicks 2 years ago, i.e., cohort
+         `percent_resight_3/cohort` = 
+           round((resight_3/lag(lag(total_juveniles_marked)))*100, 1), 
+         # Breeders moulting
+         # Number of moulting breeders / breeding population of birds
+         `percent_resight_total/cumsum_breeding_age` = 
+           round((resight_total/total_breeding_age_marked)*100, 1),
+         # All moulting
+         # Number of moulters / marked population of birds
+         `percent_resight_total/cumsum_moulting_age` = 
+           round((resight_total/total_moult_age_marked)*100, 1)) %>%
+  select(-cumsum_juveniles_marked) 
 
 
 
@@ -714,6 +688,7 @@ breeding <- read_excel("./../ALL_DATA/Data/2024-2025/BreedingSeason_2024_finalsu
 ################################################################################
 ### Weights
 #### THERE ARE PROBLEMS HERE THAT NEED FIXING
+#### Also missing 6 week marking weight for a bunch of chicks
 ```{r weights}
 
 weight_sum <- birdid %>%

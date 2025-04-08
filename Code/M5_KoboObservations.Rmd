@@ -1,0 +1,73 @@
+---
+title: "Pohatu Penguins Graphing of Kobo App Survey results"
+author: "Rachel Hickcox"
+date: "2025"
+email: "rphickcox@gmail.com"
+editor_options: 
+  chunk_output_type: console
+---
+
+# This script grooms and graphs data from Kobo Toolbox forms, which record the number of penguins and rafts observed on tour
+
+### Load packages
+```{r pkg, eval=TRUE, message=FALSE, warning=FALSE, cache=FALSE}
+pkgs <- c("ggplot2", "readxl", "flextable", "terra", "googlesheets4", "googledrive", 
+          "lubridate", "tidyverse", "openxlsx")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(pkgs, library, character.only = TRUE))
+rm(list = c("pkgs", "new.packages"))
+options(scipen = 999)
+```
+
+### Read in data
+```{r}
+kobo_1 <- read.xlsx(paste0("./../ALL_DATA/Data/Tour counts and nest checks/", "2024 JuneSept_Penguin_Counts_During_Tour.xlsx"), )
+kobo_2024 <- read.xlsx(paste0("./../ALL_DATA/Data/Tour counts and nest checks/", "2024-2025 Penguin_Counts_During_Tour.xlsx"))
+```
+
+## Combine tables
+```{r}
+kobo <- rbind(kobo_1, kobo_2024) %>%
+  mutate(date = as.Date(date, origin = "1899-12-30"), 
+         time = format(as.POSIXct(time * 86400, origin = "1970-01-01", tz = "UTC"), "%H:%M")) %>%
+  arrange(date, time) %>%
+  select(-c(tour_other, guide_other, starts_with("_")))
+
+kobo_water <- kobo %>%
+  select(c(date:clients, main_hide_water:kayak_water, full_moon)) %>% #, `weather/sunny_clear`:full_moon)) %>%
+  mutate(across(main_hide_water:kayak_water, ~ str_extract(.x, "^\\d{1,2}")), 
+         across(main_hide_water:kayak_water, ~ str_replace_all(., "51", "5")), 
+         across(main_hide_water:kayak_water, ~ str_replace_all(., "15", "1")), 
+         across(main_hide_water:kayak_water, ~ as.numeric(.))) %>%
+  pivot_longer(cols = main_hide_water:kayak_water, names_to = "hide", values_to = "count") %>%
+  mutate(hide = as.factor(hide)) %>% 
+  group_by(date, tour, hide) %>%
+  #filter(!is.na(count), hide != "pine_tree_hide_water", !tour %in% c("other", "fsnt"))
+  filter(!is.na(count), !hide %in% c("pine_tree_hide_water", "kakak_water"), tour == "evening") %>%
+  mutate(hide = str_replace_all(hide, "(\\w+)_hide_water", "\\1 hide"), 
+         hide = str_to_sentence(hide), 
+         full_moon2 = ifelse(full_moon != "yes", NA, "Yes"))
+
+ggplot(kobo_water, aes(x = date, y = count, colour = as.factor(tolower(full_moon2)))) +
+  #geom_bar(stat = "identity", position = "dodge") +  # Use bars with position dodge
+  geom_point() + 
+  scale_colour_manual(values = c("red", "black"), labels = c("Full Moon", "Other"), name = "Moon Phase") +  
+  #  geom_smooth(method = "lm", se = TRUE, color = "purple") +
+  #  geom_smooth(method = "gam", formula = y ~ s(x), se = TRUE, color = "blue") +
+  geom_smooth(method = "loess", se = TRUE, color = "skyblue2") +  
+  facet_wrap(facets = "hide") +
+  labs(colour = "Full Moon", x = "Date (2024-2025)", y = "Number of penguins on the water") +
+  theme_classic() +
+  scale_x_date(
+    expand = c(0, 0),  # Remove expansion from x-axis
+    breaks = "1 month",  # Set breaks for every month
+    labels = scales::date_format("%b")) +  # Format labels to show month and year (e.g., "Jan 2025")
+  scale_y_continuous(expand = c(0, 0),  # Remove expansion from y-axis
+    breaks = c(0, 5, 10, seq(20,  100, by = 20))) + # Set breaks to every 10
+  coord_cartesian(ylim = c(0, 100)) +  # Constrain y-axis to be >= 0
+  theme(panel.grid.major.x = element_line(color = "lightgray", size = 0.1),  #  grey vertical lines
+        panel.border = element_rect(colour = "black", fill = "transparent"), 
+        legend.position = "bottom")
+```
+
