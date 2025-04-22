@@ -605,7 +605,7 @@ sum_birdid <- birdid_all %>%
 
 ## Breeders
 resight_df <- resight_breeding %>%
-  group_by(NestYear_resight) %>%
+  group_by(NestYear_resight, Sex) %>%
   mutate(NestID = sub("^.{4}", "", FullID), .after = 1) %>%
   mutate(Age_resight = NestYear_resight - NestYear, 
          Age_resight = ifelse(Age_marking == "Adult", "Adult", Age_resight)) %>%
@@ -637,7 +637,7 @@ resight_df <- resight_breeding %>%
 
 ## Moulters
 moult_df <- resight_moult %>%
-  group_by(NestYear_resight) %>%
+  group_by(NestYear_resight, Sex) %>%
   mutate(NestID = sub("^.{4}", "", FullID), .after = 1) %>%
   mutate(Age_resight = NestYear_resight - NestYear, 
          Age_resight = ifelse(Age_marking == "Adult", "Adult", Age_resight)) %>%
@@ -676,7 +676,7 @@ moult_df <- resight_moult %>%
   select(-cumsum_juveniles_marked) 
 
 
-
+x <- resight_moult %>% filter(!BirdID %in% resight_breeding$BirdID)
 
 ```  
 
