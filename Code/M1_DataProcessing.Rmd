@@ -46,6 +46,24 @@ drive_download(file = "https://docs.google.com/spreadsheets/d/16c4c5nXbz_PFf7iyN
 birdid <- read_excel("./../ALL_DATA/Bird ID.xlsx")
 ```
 
+### Reading in cleaned yearly summary of breeding
+#### These Excel sheets were generated from M1_DataProcessing.Rmd 
+#### and cleaned manually in Excel. It contains one row per nest ID for a certain season
+```{r cleanedsum}
+cols <-  c("numeric", rep("text", 5), rep("numeric", 3), rep("text", 6),
+           rep("date", 6), "text", "numeric")
+
+breeding <- lapply(list.files("./../ALL_DATA/Data", pattern = "finalsummary_edited.xlsm", full.names = TRUE,
+                              recursive = TRUE, include.dirs = TRUE), 
+                   read_excel, col_types = cols)
+#names(breeding[[1]]) == names(breeding[[2]])
+
+monitoring_past <- bind_rows(lapply(list.files("./../ALL_DATA/Data", pattern = "Monitoring_20", full.names = TRUE,
+                              recursive = TRUE, include.dirs = TRUE), 
+                   read_excel))
+
+```
+
 ### Setup
 ```{r setup}
 # Dates
@@ -374,7 +392,7 @@ nvisits <- nests %>%
   group_by(FullID) %>% 
   summarise(nvisits = max(row_number()))
 
-# Parents
+# Parents current monitoring
 parents <- nests %>%
   mutate(NestYear = ifelse(month(DateTime) > 7, 
                            year(DateTime), 
@@ -392,6 +410,38 @@ parents <- nests %>%
   dplyr::select(-DateTime) %>%
   distinct() 
 
+parents_short <- parents %>%
+  select(NestYear, FullID, ID) %>%
+  mutate(NestID = substr(FullID, 5, nchar(FullID)), 
+         AdultRole = NA, .after = NestYear) %>%
+  select(-FullID)
+
+# List of birds, with year columns and nest box they bred in
+past_parents <- bind_rows(breeding) %>%
+  select(NestYear, NestID, Adult1ID, Adult2ID) %>%
+  pivot_longer(cols = c(Adult1ID, Adult2ID),
+               names_to = "AdultRole",
+               values_to = "ID") %>%
+  filter(!is.na(ID),  ID != "UM") %>%
+  distinct(NestYear, ID, NestID) %>%
+  bind_rows(parents %>%
+  select(NestYear, FullID, ID) %>%
+  mutate(NestID = substr(FullID, 5, nchar(FullID)), 
+         AdultRole = NA, .after = NestYear) %>%
+  select(-FullID)) %>%
+  group_by(NestYear, ID) %>%
+   summarise(NestID = paste(unique(NestID), collapse = ", "), .groups = "drop") %>%
+  pivot_wider(names_from = NestYear, values_from = NestID) %>%
+  left_join(birdid_all %>% select(`Bird ID`, Sex, Age_current, Age_marking, FullID), by = c("ID" = "Bird ID"))
+
+# Saving to Google Drive...
+#gs4_create("Nests_year_summary")
+write_sheet(past_parents, ss = gs4_find("Nests_year_summary"), sheet = "Nests_year_summary")
+
+```
+
+```{r}
+# Compare parents per year 
 parents_compare <- parents %>%
   left_join(birdid_all_f, by = c("ID" = "Bird ID"), suffix = c("", "_marking")) %>%
   #mutate(Ind = ifelse(Sex == "Female" | Sex == "Unknown", "Adult1", "Adult2")) %>%
@@ -682,7 +732,7 @@ x <- resight_moult %>% filter(!BirdID %in% resight_breeding$BirdID)
 
 ### Reading in cleaned yearly summary of breeding
 ```{r cleanedsum}
-breeding <- read_excel("./../ALL_DATA/Data/2024-2025/BreedingSeason_2024_finalsummary_edited.xlsx")
+#breeding <- read_excel("./../ALL_DATA/Data/2024-2025/BreedingSeason_2024_finalsummary_edited.xlsx")
 ```
 
 ################################################################################
@@ -703,6 +753,7 @@ weight_sum <- birdid %>%
             max_wg = max(Weight_marking, na.rm = TRUE)) %>%
   filter(NestYear != 2021, Age_marking %in% c("Chick", "Adult"))
 
+# Recent years
 weights_time <- nests %>%
   select(NestYear, FullID, DateTime, Week, starts_with("Chick ")) %>%
   filter(!is.na(`Chick 1 weight`) | !is.na(`Chick 2 weight`)) %>%
@@ -714,37 +765,134 @@ weights_time <- nests %>%
   mutate(Chick = paste(FullID, chick_number, sep = "_")) %>%
   mutate(Week_f = factor(Week, levels = c(40:58, 1:10)))
 
-ggplot(data = weights_time, aes(x = Week_f, y = weight, color = NestYear, group = FullID)) +
-  geom_point() +  # Points with transparency for clarity
-  geom_line(alpha = 0.7) +  # Line connecting the points
-  labs(
-    title = "Weight of Chicks Over Time",
-    x = "Week",
-    y = "Weight (grams)"
-  ) +
-  theme_minimal() +
-  theme(
-    legend.position = "bottom",  # Place the legend at the bottom
-    panel.grid.major = element_line(color = "gray80", size = 0.5),  # Lighter grid lines
-    panel.grid.minor = element_line(color = "gray90", size = 0.25),
-    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),  # Center title
-    axis.title = element_text(size = 12),  # Axis titles
-    axis.text = element_text(size = 10)  # Axis text
-  ) +
-  guides(color = guide_legend(title = "Nest Year"), shape = guide_legend(title = "Nest Year"))
+# Past years
+nests_past <- monitoring_past %>%
+  distinct(across(DateTime:`Chick 4 weight`), .keep_all = TRUE) %>%
+  mutate(NestYear = ifelse(month(DateTime) > 7, year(DateTime), year(DateTime)-1),
+         FullID = paste0(NestYear, `Nest ID`), 
+         Eggs = ifelse(is.na(Eggs), 0, as.numeric(Eggs)), 
+         Chicks = ifelse(is.na(Chicks), 0, as.numeric(Chicks))) %>%  #not visible to NA, error ok
+  group_by(FullID) %>%
+  arrange(`Nest ID`, DateTime) %>%
+  mutate(n = row_number()) %>%
+  mutate(n1 = ifelse(`Nest activity` == "Eggs/Chicks present", n, NA)) %>%
+  filter(NestYear != 2021) %>%
+  #error for nests never breeding, n1 is inf, error ok
+  filter(n >= min(n1, na.rm = TRUE)-1, n <= max(n1, na.rm = TRUE)+1) %>% 
+  mutate(Date_last = lag(DateTime), .before = DateTime) %>% 
+  # filter(`Nest activity` == "Eggs/Chicks present" | 
+  #          `Nest activity` == "FAILED" | 
+  #          `Nest activity` == "Empty") %>%
+  mutate(`Nest activity` = ifelse(Interaction == "Uplifted", 
+                                  "Uplifted",`Nest activity`)) %>%
+  # Flag where a new nest starts
+  mutate(NewNestFlag = case_when(
+    `Nest activity` %in% c("Eggs/Chicks present", "Uplifted", "Marking") & (lag(`Nest activity`) %in% c(NA, "Loafing adult(s)", "FAILED", "Moulting")) ~ 1,
+    TRUE ~ 0),
+    # Increment only at the last occurrence of NA/Not breeding before a new nest starts
+    Nest_number = cumsum(NewNestFlag)
+  ) %>%
+  #ungroup() %>%
+  mutate(Nest_number = ifelse(Nest_number == 0, NA, Nest_number), 
+         NestID_count = n_distinct(Nest_number, na.rm = TRUE)) %>%  # Count distinct Nest_numbers per FullID
+  mutate(FullID = ifelse(NestID_count > 1 & !is.na(NestID_count), paste(FullID, Nest_number, sep = "_"), FullID)) %>%
+  select(-c(NewNestFlag, NestID_count, Nest_number)) %>%
+  mutate(.after = 2,
+         DateTime = as.Date(DateTime),
+         Week = ifelse(year(DateTime) > yr, week(DateTime)+52, week(DateTime)),
+         Date_last = difftime(as.Date(DateTime), as.Date(Date_last), units = "days"), 
+         Est_LayDate = as.Date(first(DateTime[`Nest activity` == "Eggs/Chicks present"]), na.rm = TRUE)) %>%
+  mutate(.after = Est_LayDate, Est_HatchDate = Est_LayDate + 35) %>% 
+  dplyr::select(NestYear, FullID, `Nest ID`, Date_last:Est_HatchDate, `Nest activity`:`Adult 1`, 
+                `Adult 2`, Eggs:`Chick 1 weight`, `Chick 2 ID`:`Chick 2 weight`,
+                Notes, n, n1) %>%
+  mutate(Status = ifelse(Eggs > 0, "Eggs", NA), 
+         Status = ifelse(Chicks > 0, "Chicks", Status), 
+         .before = 2) %>% 
+  left_join(nestid_coord, by = "Nest ID") %>% 
+  mutate(n2 = lag(Chicks)) %>% 
+  group_by(FullID) %>% 
+  mutate(`Nest activity` = ifelse(lag(`Nest activity`) == "FAILED" & 
+                                    `Nest activity` == "FAILED", NA, `Nest activity`),
+         Status = ifelse(is.na(`Nest activity`), NA, Status),
+         Status = ifelse(is.na(n1) & n2 > 0, "Fledged", Status),
+         Status = ifelse(`Nest activity` == "FAILED", "Failed", Status), 
+         Status = ifelse(`Nest activity` == "Uplifted", `Nest activity`, Status),
+         #if failed followed by empty, removing all empty rows (i.e., did not fledge)
+         nn = ifelse(lag(`Nest activity`) == "FAILED" & 
+                       `Nest activity` == "Empty", "R", NA),
+         #if uplifted followed by empty, removing all empty rows (i.e., did not fledge)
+         nn = ifelse(lag(`Nest activity`) == "Uplifted" & 
+                       `Nest activity` == "Empty", "R", nn),
+         #if row fledged but was previously uplifted, changing status to the previous status (i.e., did not fledge before uplift)
+         Status = ifelse(Status == "Fledged" & 
+                           `Nest activity` %in% "Uplifted", lag(Status), Status),
+         nn = unlist(nn), 
+         NHatched = ifelse(max(Chicks, na.rm = T) > 2, 2, max(Chicks, na.rm = T)), 
+         NLaid = ifelse(NHatched == 2, 2, max(Eggs, na.rm = T))) %>% 
+  filter(!is.na(Status), is.na(nn)) %>% 
+  filter(!is.na(Date_last)) %>% 
+  dplyr::select(-c(n, n1, n2, nn))
+
+breeding_filter <- bind_rows(breeding) %>%
+  select(SeasonID, NestYear, Status, HatchDate, Est_FledgeDate, FledgeDate) %>%
+  rename("FullID" = "SeasonID")
+
+weights_time_old <- nests_past %>%
+  distinct() %>%
+  select(NestYear, FullID, DateTime, Week, starts_with("Chick "), Est_LayDate, Est_HatchDate) %>%
+  filter(!is.na(`Chick 1 weight`) | !is.na(`Chick 2 weight`)) %>%
+  left_join(breeding_filter, by = c("FullID", "NestYear")) %>%
+  pivot_longer(
+    cols = c("Chick 1 ID", "Chick 1 weight", "Chick 1 status", "Chick 2 ID", "Chick 2 weight", "Chick 2 status"),
+    names_to = c("chick_number", ".value"),
+    names_pattern = "Chick (\\d+) (.*)") %>%
+  mutate(Chick = paste(FullID, chick_number, sep = "_")) %>%
+  mutate(Week_f = factor(Week, levels = c(40:58, 1:10)))
+
+weights_time_total <- bind_rows(weights_time, weights_time_old) %>% 
+  distinct() %>%
+  arrange(FullID) %>%
+  mutate(DateTime = as.POSIXct(DateTime))
+
+# ggplot(data = weights_time_total, aes(x = Week_f, y = weight, color = NestYear, group = FullID)) +
+#   geom_point() +  # Points with transparency for clarity
+#   geom_line(alpha = 0.7) +  # Line connecting the points
+#   labs(
+#     title = "Weight of Chicks Over Time",
+#     x = "Week",
+#     y = "Weight (grams)"
+#   ) +
+#   theme_minimal() +
+#   theme(
+#     legend.position = "bottom",  # Place the legend at the bottom
+#     panel.grid.major = element_line(color = "gray80", size = 0.5),  # Lighter grid lines
+#     panel.grid.minor = element_line(color = "gray90", size = 0.25),
+#     plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),  # Center title
+#     axis.title = element_text(size = 12),  # Axis titles
+#     axis.text = element_text(size = 10)  # Axis text
+#   ) +
+#   guides(color = guide_legend(title = "Nest Year"), shape = guide_legend(title = "Nest Year"))
 
 
-weights_age <- weights_time %>%
-  mutate(Days_old = DateTime - HatchDate, 
+weights_age <- weights_time_total %>%
+  mutate(Days_old = (DateTime - HatchDate)/86400, 
+         Days_old = as.numeric(Days_old),
          Weeks_old = as.numeric(Days_old/7)) %>%
-  filter(Weeks_old <= 10)  %>% # no rehab chicks
-  arrange(FullID, chick_number)
+  filter(status != "Uplifted" & Days_old > 0 & Days_old < 100)  %>% # no rehab chicks
+  arrange(FullID, chick_number) %>%
+  distinct()
 
 weights_age_sequence <- weights_age %>%
   group_by(Chick) %>%
   mutate(n = n()) %>%
   filter(n > 2) #more than two points per penguin
 
+# weights_summary_nest <- weights_age_sequence %>%
+#   group_by(FullID) %>%
+#   left_join(birdid_adults[c(2,3,6)], by = "FullID") %>%
+#   summarise(Bird_ID = `Bird ID`) %>%
+#   distinct()
 
 ggplot(data = weights_age_sequence, aes(x = Days_old, y = weight, color = factor(NestYear), group = Chick)) +
   geom_point() +  # Points with transparency for clarity
@@ -755,7 +903,7 @@ ggplot(data = weights_age_sequence, aes(x = Days_old, y = weight, color = factor
     x = "Days old",
     y = "Weight (grams)"
   ) +
-  scale_color_manual(values = c("maroon", "gold")) +  # Manual color scale for NestYear
+  scale_color_viridis_d("NestYear") +  # Manual color scale for NestYear
   theme_minimal() +
   theme(
     panel.grid.major = element_line(color = "gray80", size = 0.5),  # Lighter grid lines
@@ -768,6 +916,7 @@ ggplot(data = weights_age_sequence, aes(x = Days_old, y = weight, color = factor
 
 # mutate(Underweight = ifelse(Weight <= 700 & days_hatch >= 42, "Concern", "Ok"), 
 #        Underweight = ifelse(Weight <= 600 & days_hatch >= 42, "Intervene", Underweight)) %>% 
+ggsave("./../ALL_DATA/Data/Chickweights_byage.png", bg = "white")
 
 weights_summary <- weights_age_sequence %>%
   group_by(Days_old, NestYear) %>%
@@ -784,12 +933,12 @@ ggplot(weights_summary, aes(x = Days_old, y = mean_weight, color = factor(NestYe
   #             alpha = 0.2) + 
   geom_smooth(method = "loess", aes(color = factor(NestYear)), se = TRUE, alpha = 0.2) +
   labs(
-    title = "Mean and Standard Deviation of Chick Weights By Age",
+    title = "Mean and Standard Error of Chick Weights By Age",
     x = "Days old",
     y = "Weight (grams)"
   ) +
-  scale_color_manual(values = c("maroon", "gold")) +  # Custom color for NestYear
-  scale_fill_manual(values = c("maroon", "gold")) +  # Custom fill color for SD ribbon
+  scale_color_viridis_d("NestYear") +  # Manual color scale for NestYear
+  scale_fill_viridis_d("NestYear") +  # Manual color scale for NestYear
   theme_minimal() +
   theme(
     panel.grid.major = element_line(color = "gray80", size = 0.5),
@@ -799,9 +948,9 @@ ggplot(weights_summary, aes(x = Days_old, y = mean_weight, color = factor(NestYe
     axis.text = element_text(size = 10)
   ) +
   guides(color = guide_legend(title = "Nest Year"), fill = guide_legend(title = "Nest Year"))
-
-
+ggsave("./../ALL_DATA/Data/Chickweights_meanbyage.png", bg = "white")
 ```
+
 
 ```{r ecfateplot}
 # ecfate <- read_excel("nests_ecfate_18112022.xlsx")
