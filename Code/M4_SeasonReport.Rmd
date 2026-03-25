@@ -109,6 +109,112 @@ rownames(summary_list) <- NULL
 
 # Save
 ```{r}
-write.csv(summary_list, "./../ALL_DATA/Data/2024-2025/SeasonsSummaryReport.csv", row.names = FALSE)
+write.csv(summary_list, "./../ALL_DATA/Data/2025-2026/SeasonsSummaryReport.csv", row.names = FALSE)
+```
+
+# Plots
+```{r}
+library(patchwork)
+
+# -- Assumes df_summary has one row per NestYear from your summarise() output --
+
+# Colour palette
+col_laid    <- "#3266ad"
+col_hatched <- "#1d9e75"
+col_fledged <- "#d85a30"
+col_flednat <- "#d4537e"
+col_nests   <- "#7f77dd"
+col_twocl   <- "#ef9f27"
+
+base_theme <- theme_classic(base_size = 11) +
+  theme(axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.key.size = unit(0.4, "cm"))
+
+df_summary <- summary_list %>%
+  pivot_longer(-Variable, names_to = "NestYear", values_to = "value") %>%
+  mutate(NestYear = as.integer(NestYear),
+    value    = as.numeric(trimws(value))) %>%
+  #pivot_wider(names_from = Variable, values_from = value)
+filter(Variable %in% c("Nests", "Nestboxes", "Laid", "Hatched", "Fledged", 
+                       "Percent_EggsHatched_perLaid",   
+                       "Percent_ChicksFledged_perHatched",
+                       "Percent_ChicksFledged_perLaid", 
+                       "HatchingSuccess_perPair",
+                       "FledgingSuccess_perPair"))
+
+
+pct_vars  <- c("Percent_EggsHatched_perLaid",
+               "Percent_ChicksFledged_perHatched",
+               "Percent_ChicksFledged_perLaid")
+pair_vars <- c("HatchingSuccess_perPair","FledgingSuccess_perPair")
+
+# Bar chart of success perentages
+p1 <-
+  df_summary %>%
+  filter(Variable %in% pct_vars) %>%
+  mutate(Variable = factor(Variable, levels = pct_vars),
+         NestYear = factor(NestYear),
+         x_pos = as.numeric(Variable) + 
+                   (as.numeric(NestYear) - 2.5) * 0.2) %>%
+  ggplot(aes(x_pos, value, fill = NestYear)) +
+  geom_col(width = 0.2) +
+  geom_line(aes(group = Variable), colour = "orange", linewidth = 1) +
+  geom_text(aes(label = round(value, 1)), colour = "white",
+            vjust = 2, size = 3, fontface = "bold") +
+  scale_fill_viridis_d(option = "mako", begin = 0.1, end = 0.8) +
+  scale_colour_viridis_d(option = "mako", begin = 0.1, end = 0.8) +
+  scale_x_continuous(breaks = 1:3,
+                     labels = c("Hatching success \n(Eggs hatched/Eggs laid)",
+                                "Fledging success \n(Chicks fledged/Eggs hatched)",
+                                "Breeding success \n(Chicks fledged/Eggs laid)")) +
+scale_y_continuous(limits = c(0, 100), expand = FALSE) +
+  labs(x = NULL, y = "Percent", fill = NULL, colour = NULL) +
+  theme_classic(base_size = 12) +
+  theme(legend.position = "bottom")
+
+p2 <- 
+  df_summary %>%
+  filter(Variable %in% c("Laid", "Hatched", "Fledged")) %>%
+  mutate(Variable = factor(Variable, levels = c("Laid", "Hatched", "Fledged")),
+         NestYear = factor(NestYear),
+         x_pos = as.numeric(Variable) + 
+                   (as.numeric(NestYear) - 2.5) * 0.2) %>%
+  ggplot(aes(x_pos, value, fill = NestYear)) +
+  geom_col(width = 0.2) +
+  geom_line(aes(group = Variable), colour = "orange", linewidth = 1) +
+  geom_text(aes(label = round(value, 1)), colour = "white",
+            vjust = 2, size = 3, fontface = "bold") +
+  scale_fill_viridis_d(option = "mako", begin = 0.1, end = 0.8) +
+  scale_x_continuous(breaks = 1:3,
+                     labels = c("Eggs laid", "Eggs hatched", "Chicks fledged")) +
+  scale_y_continuous(limits = c(0, 400), expand = FALSE) +
+labs(x = NULL, y = "Count", fill = NULL) +
+  theme_classic(base_size = 12) +
+  theme(legend.position = "none")
+
+# Combine 
+ggsave(p2/p1, filename = "./../ALL_DATA/Data/BreedingSuccess_plot_allyears.png",
+       width = 8, height = 5, dpi = 300)
+
+
+# Secondary axis breeding success
+
+scale_factor <- 50
+
+ggplot() +
+  geom_line(data = filter(df_summary, Variable %in% pct_vars),
+            aes(NestYear, value, colour = Variable), linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Percent (%)",
+    sec.axis = sec_axis(~ . / scale_factor, name = "Success per pair")
+  ) +
+  scale_x_continuous(breaks = unique(df_summary$NestYear)) +
+  theme_classic(base_size = 11)
+
+
+
+
 ```
 

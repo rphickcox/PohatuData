@@ -9,7 +9,7 @@ editor_options:
 
 ```{r}
 library(here)
-source(here("Code", "M1_DataProcessing.Rmd"))
+#source(here("Code", "M1_DataProcessing.Rmd"))
 yr <- ifelse(month(today()) > 8, year(today()), year(today())-1) # yr
 start <- floor_date(as.Date(paste0("01-08-", yr), "%d-%m-%Y"), "weeks", week_start = 1) # start date
 end <- as.Date(paste0("01-09-", yr + 1), "%d-%m-%Y")
@@ -18,7 +18,7 @@ non_br <- as.Date(paste0("01-04-", yr + 1), "%d-%m-%Y")
 
 ### Reading in cleaned yearly summary of breeding
 ```{r breedingsum}
-breeding <- read_excel("../ALL_DATA/Data/2024-2025/BreedingSeason_2024_finalsummary_edited.xlsm")
+breeding <- read_excel("../ALL_DATA/Data/2025-2026/BreedingSeason_2025_finalsummary_edited.xlsm")
 breeding <- breeding %>% 
   select(NestID:Status, NFledged) %>%
   pivot_longer(cols = c("Adult1ID", "Adult2ID"), names_to = "X", values_to = "BirdID" ) %>% 
@@ -29,16 +29,6 @@ breeding <- breeding %>%
 ### Bird banding numbers
 ```{r}
 df <- read_excel("../ALL_DATA/Data/NZNBBS_trainees_log.xlsx", sheet = 2)
-# df <- data.frame(x = c("Rachel", "Ave", "Kevin", "Henry", "Kaitlyn  Leeds", "Lucy Howell",
-#                        "Georgia Gwatkin", "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", "Geraldine", 
-#                        "Joey", "Ben", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
-#                  y = c("Rachel Hickcox", "Averil Parthonnaud", "Kevin Parthonnaud", 
-#                        "Henry Elsom", "Kaitlyn Leeds", "Lucy Howell", "Georgia Gwatkin", 
-#                        "Alexandra Strang", "Michelle LaRue", "Sarah Flanagan", 
-#                        "Geraldine Guillemont-Peacock", "Josephine Cataliotti", 
-#                        "Benoit Navarron", "Thomas Stracke", "Kaitlin Bowe", "Keegan Miskimmin"), 
-#                  n = c("0722", "0786", "1121", "0791", "1017", "1150","1191", "1153", "1157", "1158", "1120", "1119", "1118", "0724", "1354", "0870"))
-
 ```
 
 ### Bird ID summary- formatted to NZNBBS spreadsheet 'Data BOX v.FALCON.1x'
@@ -315,5 +305,5 @@ names(resight_all) <- colnam
 resight_birdid
 
 all <- marking_fix %>% bind_rows(resight_all)
-write.xlsx(all, "../ALL_DATA/Data/2024-2025/NZNBBS_PohatuPenguins_2024_2025_R.xlsx", rowNames = FALSE)
+write.xlsx(all, "../ALL_DATA/Data/2025-2026/NZNBBS_PohatuPenguins_2025_2026_R.xlsx", rowNames = FALSE)
 ```
